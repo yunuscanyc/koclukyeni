@@ -1,0 +1,6 @@
+{
+  "name": "YKS Öğrenci Koçluğu & Takip Portalı",
+  "description": "Kapsamlı YKS ve öğrenci koçluğu yönetim platformu: öğrenci profilleri, hedefler, koç notları, günlük çalışmalar, soru takibi, deneme netleri, müfredat kazanımları ve yapay zeka destekli gelişim raporları.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
