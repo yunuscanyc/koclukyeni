@@ -121,23 +121,28 @@ const PHOTOS_FILE_PATH = path.join(process.cwd(), "data", "photos_db.json");
 
 // Indestructible photo cache keyed by archiveId
 const globalPhotoStore = new Map<string, any[]>();
+let photoSaveTimeout: NodeJS.Timeout | null = null;
+let dbSaveTimeout: NodeJS.Timeout | null = null;
 
 function savePhotosToFile() {
-  try {
-    const dataDir = path.join(process.cwd(), "data");
-    if (!fs.existsSync(dataDir)) {
-      fs.mkdirSync(dataDir, { recursive: true });
-    }
-    const photoObj: Record<string, any[]> = {};
-    for (const [id, photos] of globalPhotoStore.entries()) {
-      if (photos && photos.length > 0) {
-        photoObj[id] = photos;
+  if (photoSaveTimeout) clearTimeout(photoSaveTimeout);
+  photoSaveTimeout = setTimeout(async () => {
+    try {
+      const dataDir = path.join(process.cwd(), "data");
+      if (!fs.existsSync(dataDir)) {
+        await fs.promises.mkdir(dataDir, { recursive: true });
       }
+      const photoObj: Record<string, any[]> = {};
+      for (const [id, photos] of globalPhotoStore.entries()) {
+        if (photos && photos.length > 0) {
+          photoObj[id] = photos;
+        }
+      }
+      await fs.promises.writeFile(PHOTOS_FILE_PATH, JSON.stringify(photoObj), "utf8");
+    } catch (err: any) {
+      console.error("[Photos Save Error]:", err.message);
     }
-    fs.writeFileSync(PHOTOS_FILE_PATH, JSON.stringify(photoObj), "utf8");
-  } catch (err: any) {
-    console.error("[Photos Save Error]:", err.message);
-  }
+  }, 400);
 }
 
 function loadPhotosFromFile() {
@@ -158,28 +163,41 @@ function loadPhotosFromFile() {
 }
 
 function saveDbToFile() {
-  try {
-    const dataDir = path.join(process.cwd(), "data");
-    if (!fs.existsSync(dataDir)) {
-      fs.mkdirSync(dataDir, { recursive: true });
+  if (dbSaveTimeout) clearTimeout(dbSaveTimeout);
+  dbSaveTimeout = setTimeout(async () => {
+    try {
+      const dataDir = path.join(process.cwd(), "data");
+      if (!fs.existsSync(dataDir)) {
+        await fs.promises.mkdir(dataDir, { recursive: true });
+      }
+      // Sanitize archives to avoid storing huge duplicate base64 in server_db.json
+      const sanitizedArchives = memArchives.map((a) => {
+        const photoCount = (a.sayfaFotolari || a.fotografYollari || []).length;
+        return {
+          ...a,
+          sayfaFotolari: Array(photoCount).fill(""),
+          fotografYollari: Array(photoCount).fill(""),
+          photosCount: photoCount,
+        };
+      });
+
+      const payload = {
+        students: memStudents,
+        notes: memNotes,
+        questions: memQuestions,
+        exams: memExams,
+        curriculum: memCurriculum,
+        archives: sanitizedArchives,
+        schedules: memSchedules,
+        books: memBooks,
+        assignedResources: memAssignedResources,
+        coachPin: memCoachPin
+      };
+      await fs.promises.writeFile(DB_FILE_PATH, JSON.stringify(payload), "utf8");
+    } catch (err: any) {
+      console.error("[DB Save Error]:", err.message);
     }
-    const payload = {
-      students: memStudents,
-      notes: memNotes,
-      questions: memQuestions,
-      exams: memExams,
-      curriculum: memCurriculum,
-      archives: memArchives,
-      schedules: memSchedules,
-      books: memBooks,
-      assignedResources: memAssignedResources,
-      coachPin: memCoachPin
-    };
-    fs.writeFileSync(DB_FILE_PATH, JSON.stringify(payload, null, 2), "utf8");
-    savePhotosToFile();
-  } catch (err: any) {
-    console.error("[DB Save Error]:", err.message);
-  }
+  }, 300);
 }
 
 function loadDbFromFile() {
@@ -3554,7 +3572,10 @@ Sana verilen bu test / sınav sayfası görselindeki (${sinavTuru}) BASILI GERÇ
 
 ÖNEMLİ KURALLAR:
 1. Fiziksel Sayfa Tespiti: Fotoğrafta BASILI OLARAK GÖRÜNEN GERÇEK SORULARI tespit et. Görünmeyen soru uydurma!
-2. Soru Numarası: Fotoğrafta basılı olan orijinal soru numarasını oku (örn: 20).
+2. YARIM, KESİK VE YAN SAYFADAN TAŞAN SORULARI GÖZARDI ET (KESİNLİKLE ALMA):
+   - Fotoğrafın kenarlarında (sağ, sol, alt veya üst kenarında) yarısı kadraja girmiş, bir kısmı kesilmiş, metni eksik veya yan sayfadan taşmış soruları KESİNLİKLE LİSTEYE ALMA, GÖZARDI ET!
+   - Sadece bu sayfada tam, bütün ve eksiksiz olarak basılı bulunan, tüm metni ve şıkları net okunabilen soruları çöz.
+3. Soru Numarası: Fotoğrafta basılı olan orijinal soru numarasını oku (örn: 20).
 3. Soru Türü (soruTuru): 
    - "coktan_secmeli": A, B, C, D, E gibi seçenekleri olan sorular.
    - "bosluk_doldurma": Cümle veya tablo içindeki boşlukları doldurma soruları (şık harfleri yoktur).
@@ -4079,30 +4100,33 @@ Sana verilen bu test / deneme sayfası fotoğrafındaki (Sayfa ${pageIdx + 1}, $
 
 KRİTİK KURALLAR:
 1. SAYFA BAŞLIĞINI OKU (DERS VE TEST TESPİTİ): Sayfanın en üstünde veya üst bölümünde yazan test başlığını ve ders adını oku (Örn: "FEN BİLİMLERİ TESTİ", "FİZİK", "KİMYA", "BİYOLOJİ", "TÜRKÇE", "TÜRK DİLİ VE EDEBİYATI", "MATEMATİK", "GEOMETRİ", "TARİH", "COĞRAFYA", "FELSEFE", "DİN KÜLTÜRÜ"). Her sorunun "ders" alanına sayfadaki GERÇEK DERS ADINI yaz (Örn: "Fizik (AYT)", "Kimya (AYT)", "Biyoloji (AYT)", "Matematik (TYT)", "Türkçe (TYT)", "Tarih", "Geometri"). Sayfada yazan test dersini dikkate al, varsayılan olarak Matematik deme!
-2. SAYFADAKİ TÜM SORULARI SIRAYLA SAY VE ÇÖZ: Sayfadaki her bir basılı soru numarasını (1, 2, 3, 4...) dikkatle tespit et. Sayfada kaç adet basılı soru varsa (örneğin 4 soru varsa), JSON dizisinde TAM O KADAR soru objesi döndür! Tek bir soruyu bile atlama.
-3. ÖĞRENCİ ÇÖZMEMİŞ VEYA BOŞ BIRAKMIŞ OLSA BİLE: Öğrencinin sayfadaki soruları çözmemiş veya boş bırakmış olması durumunda DA SAYFADAKİ TÜM BASILI SORULARI ÇIKAR VE ÇÖZ! Öğrencinin işaretlediği şıkkı "Boş" olarak kaydet, doğru cevabı ve detaylı çözümü eksiksiz yaz.
-4. Soru Numarası: Fotoğrafta basılı olan orijinal soru numarasını oku (örn: 20).
-5. Soru Türü (soruTuru): "coktan_secmeli", "bosluk_doldurma", "acik_uclu", "dogru_yanlis".
-6. Ders: Tam ders adı (Örn: "Fizik (AYT)", "Kimya (AYT)", "Biyoloji (AYT)", "Matematik (TYT)", "Türkçe (TYT)", "Geometri", "Tarih-1", "Coğrafya-1").
-7. Ünite: Sorunun ait olduğu MEB ana ünitesi.
-8. Konu: Sorunun alt konu başlığı.
-9. MEB Kazanım Kodu ve Açıklaması:
+2. YARIM, KESİK VE YAN SAYFADAN TAŞAN SORULARI GÖZARDI ET (KESİNLİKLE ALMA):
+   - Fotoğrafın kenarlarında (sağ, sol, alt veya üst sınırında) yarısı kadraja girmiş, bir kısmı kesilmiş, metni eksik veya karşı/yan sayfadan taşmış soruları KESİNLİKLE LİSTEYE ALMA, GÖZARDI ET!
+   - Yalnızca bu sayfada TAM, BÜTÜN ve EKSİKSİZ olarak basılı bulunan soruları çöz.
+3. SAYFADAKİ TÜM TAM SORULARI SIRAYLA SAY VE ÇÖZ: Sayfadaki her bir basılı tam soru numarasını (1, 2, 3, 4...) dikkatle tespit et. Sayfada kaç adet tam basılı soru varsa, JSON dizisinde TAM O KADAR soru objesi döndür!
+4. ÖĞRENCİ ÇÖZMEMİŞ VEYA BOŞ BIRAKMIŞ OLSA BİLE: Öğrencinin sayfadaki soruları çözmemiş veya boş bırakmış olması durumunda DA SAYFADAKİ TÜM BASILI SORULARI ÇIKAR VE ÇÖZ! Öğrencinin işaretlediği şıkkı "Boş" olarak kaydet, doğru cevabı ve detaylı çözümü eksiksiz yaz.
+5. Soru Numarası: Fotoğrafta basılı olan orijinal soru numarasını oku (örn: 20).
+6. Soru Türü (soruTuru): "coktan_secmeli", "bosluk_doldurma", "acik_uclu", "dogru_yanlis".
+7. Ders: Tam ders adı (Örn: "Fizik (AYT)", "Kimya (AYT)", "Biyoloji (AYT)", "Matematik (TYT)", "Türkçe (TYT)", "Geometri", "Tarih-1", "Coğrafya-1").
+8. Ünite: Sorunun ait olduğu MEB ana ünitesi.
+9. Konu: Sorunun alt konu başlığı.
+10. MEB Kazanım Kodu ve Açıklaması:
    - "kazanimKodu": Gerçek MEB kazanım kodu (Örn: "MAT.10.1.2", "FIZ.11.2.1", "KIM.10.3.1", "BIY.11.1.4").
    - "kazanimAciklama": Sorunun ölçtüğü tam MEB kazanım açıklaması.
-10. Çözüm Detayı (cozumDetayi): Sorunun tam, adım adım matematiksel/mantıksal çözümü (LaTeX $...$ kullanarak).
-11. ŞIKLI SORULARDA İŞARETLENEN ŞIK:
+11. Çözüm Detayı (cozumDetayi): Sorunun tam, adım adım matematiksel/mantıksal çözümü (LaTeX $...$ kullanarak).
+12. ŞIKLI SORULARDA İŞARETLENEN ŞIK:
     - Öğrencinin kurşun/tükenmez kalemle daire içine aldığı, boyadığı, yanına tik koyduğu veya yazdığı şıkkı ("A", "B", "C", "D", "E") 'isaretlenenSik' ve 'ogrenciCevabi' olarak oku.
     - Sadece sayfada hiçbir işaretleme/seçim yoksa: isaretlenenSik: "Boş", ogrenciCevabi: "Boş", dogruMu: false.
-12. BOŞLUK DOLDURMA, AÇIK UÇLU VE SAYISAL SORULARDA EL YAZISI TESPİTİ:
+13. BOŞLUK DOLDURMA, AÇIK UÇLU VE SAYISAL SORULARDA EL YAZISI TESPİTİ:
     - Soru şıklı değilse veya öğrenci soru alanına el yazısıyla işlem/çözüm yapmışsa soruTuru: "acik_uclu" veya "bosluk_doldurma" olarak belirle.
     - EL YAZISI VE SONUÇ: Sorunun altına, çözüm kutusuna, kenar boşluğuna veya soru metninin yanına öğrencinin kurşun/tükenmez kalemle yazdığı işlemleri, ulaştığı nihai sayıyı, daire/kutu içine aldığı sonucu veya kelimeyi (Örn: "12", "x=12", "Fotosentez", "42", "4/3") DİKKATLE OKU ve 'ogrenciCevabi' alanına yaz!
     - Sayfada öğrencinin el yazısıyla yazdığı bir sayı/cevap varken ASLA "Boş" yazma!
     - Yalnızca soru alanında ve kenarlarında öğrenciye ait HİÇBİR el yazısı veya işlem bulunmuyorsa ogrenciCevabi: "Boş" yaz.
     - dogruCevap: Sorunun doğru çözümü/sonucu (Örn: "12", "Fotosentez").
     - isaretlenenSik: "-".
-13. Doğruluk (dogruMu):
+14. Doğruluk (dogruMu):
     - Öğrenci cevabı doğruysa true, yanlışsa veya boşsa false.
-14. Analiz Notu: Duruma dair kısa pedagojik açıklama.
+15. Analiz Notu: Duruma dair kısa pedagojik açıklama.
 
 Yanıt formatı SADECE geçerli bir JSON dizisi olmalıdır:
 [

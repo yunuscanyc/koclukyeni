@@ -65,7 +65,7 @@ export const StudentTestUploadModal: React.FC<StudentTestUploadModalProps> = ({
 
   if (!isOpen) return null;
 
-  // Helper to process photo files with error notifications
+  // Helper to process photo files in parallel with high speed
   const processPhotoFiles = async (fileList: FileList | null, sourceLabel: string) => {
     if (!fileList || fileList.length === 0) return;
 
@@ -73,26 +73,25 @@ export const StudentTestUploadModal: React.FC<StudentTestUploadModalProps> = ({
     setIsProcessingPhoto(true);
 
     try {
-      const validPhotos: string[] = [];
-      for (let i = 0; i < fileList.length; i++) {
-        const file = fileList[i];
-        if (!file) continue;
-
-        try {
-          const compressedBase64 = await compressImageFile(file);
-          if (compressedBase64 && compressedBase64.length > 50) {
-            validPhotos.push(compressedBase64);
-          } else {
-            setErrorMessage(`${sourceLabel} fotoğrafı işlenemedi. Lütfen tekrar deneyin.`);
+      const filesArray = Array.from(fileList);
+      const results = await Promise.all(
+        filesArray.map(async (file) => {
+          if (!file) return null;
+          try {
+            const compressed = await compressImageFile(file);
+            return compressed && compressed.length > 50 ? compressed : null;
+          } catch (err: any) {
+            console.warn(`${sourceLabel} fotoğraf hatası:`, err);
+            return null;
           }
-        } catch (err: any) {
-          console.warn(`${sourceLabel} fotoğraf hatası:`, err);
-          setErrorMessage(`Fotoğraf işlenemedi: ${err?.message || 'Geçersiz görsel'}`);
-        }
-      }
+        })
+      );
 
+      const validPhotos = results.filter(Boolean) as string[];
       if (validPhotos.length > 0) {
         setPhotos((prev) => [...prev, ...validPhotos]);
+      } else {
+        setErrorMessage(`${sourceLabel} fotoğrafları işlenemedi. Lütfen tekrar deneyin.`);
       }
     } finally {
       setIsProcessingPhoto(false);

@@ -76,27 +76,43 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
     }
   }, [archives, selectedArchiveId]);
 
-  // Lazy-fetch full archive details (high-res page photos) when an archive is selected
+  // Lazy-fetch & pre-fetch full archive details (high-res page photos)
   useEffect(() => {
-    if (!selectedArchiveId) return;
-    const rawArch = archives.find((a) => a.id === selectedArchiveId);
-    if (!rawArch) return;
+    if (!archives || archives.length === 0) return;
 
-    const cached = fullArchiveCache[selectedArchiveId];
-    const photos = cached?.sayfaFotolari || rawArch.sayfaFotolari || [];
-    const hasFullPhotos = photos.some((p) => typeof p === 'string' && p.length > 500);
+    if (selectedArchiveId) {
+      const rawArch = archives.find((a) => a.id === selectedArchiveId);
+      if (rawArch) {
+        const cached = fullArchiveCache[selectedArchiveId];
+        const photos = cached?.sayfaFotolari || rawArch.sayfaFotolari || [];
+        const hasFullPhotos = photos.some((p: any) => typeof p === 'string' ? p.length > 500 : Boolean(p?.imageBase64 && p.imageBase64.length > 500));
 
-    if (!hasFullPhotos && loadingArchiveId !== selectedArchiveId) {
-      setLoadingArchiveId(selectedArchiveId);
-      getExamArchiveById(selectedArchiveId)
-        .then((fullArch) => {
-          if (fullArch) {
-            setFullArchiveCache((prev) => ({ ...prev, [selectedArchiveId]: fullArch }));
-          }
-        })
-        .catch((err) => console.warn('getExamArchiveById error:', err))
-        .finally(() => setLoadingArchiveId(null));
+        if (!hasFullPhotos && loadingArchiveId !== selectedArchiveId) {
+          setLoadingArchiveId(selectedArchiveId);
+          getExamArchiveById(selectedArchiveId)
+            .then((fullArch) => {
+              if (fullArch) {
+                setFullArchiveCache((prev) => ({ ...prev, [selectedArchiveId]: fullArch }));
+              }
+            })
+            .catch((err) => console.warn('getExamArchiveById error:', err))
+            .finally(() => setLoadingArchiveId(null));
+        }
+      }
     }
+
+    // Background pre-fetch top recent archives so switching is INSTANT
+    archives.slice(0, 5).forEach((a) => {
+      if (!fullArchiveCache[a.id]) {
+        getExamArchiveById(a.id)
+          .then((fullArch) => {
+            if (fullArch) {
+              setFullArchiveCache((prev) => ({ ...prev, [a.id]: fullArch }));
+            }
+          })
+          .catch(() => {});
+      }
+    });
   }, [selectedArchiveId, archives]);
 
   // When coach views an archive, mark it as read on the backend (isNew: false)

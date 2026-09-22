@@ -51,9 +51,9 @@ async function prepareImageFile(file: File): Promise<Blob | File> {
 
 export async function compressImageFile(
   rawFile: File,
-  maxWidth = 1200,
-  maxHeight = 1600,
-  quality = 0.72
+  maxWidth = 1100,
+  maxHeight = 1500,
+  quality = 0.68
 ): Promise<string> {
   const file = await prepareImageFile(rawFile);
 

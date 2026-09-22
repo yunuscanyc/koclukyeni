@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   GraduationCap, 
   LogOut, 
@@ -115,6 +115,7 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
   const [retryingArchiveId, setRetryingArchiveId] = useState<string | null>(null);
   const [confirmResetId, setConfirmResetId] = useState<string | null>(null);
   const [loadingArchiveId, setLoadingArchiveId] = useState<string | null>(null);
+  const [studentArchiveCache, setStudentArchiveCache] = useState<Record<string, OgrenciSinavKaydi>>({});
   const [isDownloadingStudentZip, setIsDownloadingStudentZip] = useState(false);
   const [studentZipProgress, setStudentZipProgress] = useState('');
 
@@ -268,6 +269,22 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
   const myExams = exams.filter((e) => !e.studentId || e.studentId === student.id);
   const myAssignedResources = (assignedResources || []).filter((r) => r.studentId === student.id);
   const pendingAssignedResources = myAssignedResources.filter((r) => !r.completed);
+
+  // Background pre-fetch images for student tests so opening is INSTANT
+  useEffect(() => {
+    if (activePortalTab !== 'testler' || myArchives.length === 0) return;
+    myArchives.slice(0, 6).forEach((arch) => {
+      if (!studentArchiveCache[arch.id]) {
+        getExamArchiveById(arch.id)
+          .then((fullArch) => {
+            if (fullArch) {
+              setStudentArchiveCache((prev) => ({ ...prev, [arch.id]: fullArch }));
+            }
+          })
+          .catch(() => {});
+      }
+    });
+  }, [activePortalTab, myArchives]);
 
   // Synchronize selectedArchive when studentArchives updates from backend polling
   React.useEffect(() => {
@@ -678,6 +695,12 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
                           if (isOpen) {
                             setSelectedArchive(null);
                           } else {
+                            const cached = studentArchiveCache[arch.id];
+                            if (cached) {
+                              setSelectedArchive(cached);
+                              return;
+                            }
+
                             setSelectedArchive(arch);
                             const photos = arch.sayfaFotolari || arch.fotografYollari || [];
                             const hasFullPhotos = photos.some((p) => typeof p === 'string' && p.length > 500);
@@ -687,6 +710,7 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
                               try {
                                 const fullArch = await getExamArchiveById(arch.id);
                                 if (fullArch) {
+                                  setStudentArchiveCache((prev) => ({ ...prev, [arch.id]: fullArch }));
                                   setSelectedArchive((prev) => (prev?.id === arch.id ? { ...prev, ...fullArch } : fullArch));
                                 }
                               } catch (err) {
