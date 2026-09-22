@@ -3374,56 +3374,59 @@ function normalizeAndValidateQuestion(
     soruTuru = "acik_uclu";
   } else if (rawSoruTuru.includes("dogru") || rawSoruTuru.includes("doğru") || rawSoruTuru.includes("true")) {
     soruTuru = "dogru_yanlis";
-  } else if (q.isaretlenenSik && ["A", "B", "C", "D", "E"].includes(String(q.isaretlenenSik).trim().toUpperCase())) {
-    soruTuru = "coktan_secmeli";
   }
 
+  // Extract student choice / marking across all possible fields
+  const rawStudentMark = String(q.isaretlenenSik || q.ogrenciCevabi || q.studentAnswer || q.secenek || "").trim();
+  const rawCorrectAnswer = String(q.dogruCevap || q.correctAnswer || q.cevap || "").trim();
+
+  const isExplicitlyBlank = (
+    !rawStudentMark ||
+    rawStudentMark.toLowerCase() === "boş" ||
+    rawStudentMark.toLowerCase() === "bos" ||
+    rawStudentMark.toLowerCase() === "unanswered" ||
+    rawStudentMark.toLowerCase() === "yok" ||
+    rawStudentMark.toLowerCase() === "null" ||
+    rawStudentMark === "-"
+  );
+
   let isBlank = false;
-  let ogrenciCevabi = typeof q.ogrenciCevabi === "string" ? q.ogrenciCevabi.trim() : (q.ogrenciCevabi ? String(q.ogrenciCevabi).trim() : "");
-  let isaretlenenSik = typeof q.isaretlenenSik === "string" ? q.isaretlenenSik.trim() : (q.isaretlenenSik ? String(q.isaretlenenSik).trim() : "");
-  const dogruCevap = typeof q.dogruCevap === "string" && q.dogruCevap.trim() ? q.dogruCevap.trim() : (q.dogruCevap ? String(q.dogruCevap).trim() : "A");
+  let isaretlenenSik = "";
+  let ogrenciCevabi = "";
+  let dogruCevap = "";
 
   if (soruTuru === "coktan_secmeli") {
-    // Şıklı soru: A-E harfi aranır
-    const optMatch = isaretlenenSik.match(/^[A-E]$/i) || ogrenciCevabi.match(/^[A-E]$/i);
-    if (optMatch) {
-      isaretlenenSik = optMatch[0].toUpperCase();
-      ogrenciCevabi = isaretlenenSik;
-      isBlank = false;
-    } else if (
-      !isaretlenenSik ||
-      isaretlenenSik.toLowerCase() === "boş" ||
-      isaretlenenSik.toLowerCase() === "bos" ||
-      isaretlenenSik === "-" ||
-      !ogrenciCevabi ||
-      ogrenciCevabi.toLowerCase() === "boş" ||
-      ogrenciCevabi.toLowerCase() === "bos" ||
-      ogrenciCevabi === "-"
-    ) {
+    // Doğru cevap harfi (A-E)
+    const correctLetterMatch = rawCorrectAnswer.match(/([A-E])/i);
+    dogruCevap = correctLetterMatch ? correctLetterMatch[1].toUpperCase() : "A";
+
+    if (isExplicitlyBlank) {
       isBlank = true;
       isaretlenenSik = "Boş";
       ogrenciCevabi = "Boş";
     } else {
-      isaretlenenSik = isaretlenenSik.substring(0, 1).toUpperCase();
-      ogrenciCevabi = isaretlenenSik;
-      isBlank = false;
+      // Öğrencinin işaretlediği harfi bul (A-E)
+      const studentLetterMatch = rawStudentMark.match(/([A-E])/i);
+      if (studentLetterMatch) {
+        isaretlenenSik = studentLetterMatch[1].toUpperCase();
+        ogrenciCevabi = isaretlenenSik;
+        isBlank = false;
+      } else {
+        isBlank = true;
+        isaretlenenSik = "Boş";
+        ogrenciCevabi = "Boş";
+      }
     }
   } else {
-    // Boşluk doldurma veya açık uçlu: isaretlenenSik '-' olur, asıl cevap ogrenciCevabi'dır
+    // Boşluk doldurma / açık uçlu / doğru yanlış
     isaretlenenSik = "-";
-    if (
-      !ogrenciCevabi ||
-      ogrenciCevabi.toLowerCase() === "boş" ||
-      ogrenciCevabi.toLowerCase() === "bos" ||
-      ogrenciCevabi === "-" ||
-      ogrenciCevabi.toLowerCase() === "unanswered" ||
-      ogrenciCevabi.toLowerCase() === "yok" ||
-      ogrenciCevabi.toLowerCase() === "null"
-    ) {
+    dogruCevap = rawCorrectAnswer || "Cevap";
+    if (isExplicitlyBlank) {
       isBlank = true;
       ogrenciCevabi = "Boş";
     } else {
       isBlank = false;
+      ogrenciCevabi = rawStudentMark;
     }
   }
 
@@ -3445,22 +3448,18 @@ function normalizeAndValidateQuestion(
     dogruMu = false;
   }
 
-  // Tutarlı ve çelişkisiz analizNotu formülasyonu
+  // Analiz notu
   let analizNotu = q.analizNotu || "";
   if (isBlank) {
     analizNotu = "Öğrenci bu soruyu çözmemiş / boş bırakmıştır.";
   } else if (dogruMu) {
-    if (!analizNotu || analizNotu.toLowerCase().includes("boş") || analizNotu.toLowerCase().includes("yanlış")) {
-      analizNotu = soruTuru === "coktan_secmeli"
-        ? `Öğrenci doğru seçenek olan (${dogruCevap}) şıkkını işaretlemiştir.`
-        : `Öğrenci boşluğu doğru cevap olan (${ogrenciCevabi}) ile doldurmuştur.`;
-    }
+    analizNotu = soruTuru === "coktan_secmeli"
+      ? `Öğrenci doğru seçenek olan (${dogruCevap}) şıkkını işaretlemiştir.`
+      : `Öğrenci boşluğu doğru cevap olan (${ogrenciCevabi}) ile doldurmuştur.`;
   } else {
-    if (!analizNotu || analizNotu.toLowerCase().includes("boş") || analizNotu.toLowerCase().includes("doğru")) {
-      analizNotu = soruTuru === "coktan_secmeli"
-        ? `Öğrenci (${isaretlenenSik}) şıkkını işaretlemiş, doğru cevap (${dogruCevap}) olmalıdır.`
-        : `Öğrenci (${ogrenciCevabi}) yazmış, doğru cevap (${dogruCevap}) olmalıdır.`;
-    }
+    analizNotu = soruTuru === "coktan_secmeli"
+      ? `Öğrenci (${isaretlenenSik}) şıkkını işaretlemiş, doğru cevap (${dogruCevap}) olmalıdır.`
+      : `Öğrenci (${ogrenciCevabi}) yazmış, doğru cevap (${dogruCevap}) olmalıdır.`;
   }
 
   const parsedDers = typeof q.ders === "string" && q.ders.trim() ? q.ders.trim() : fallbackDers;
@@ -3534,8 +3533,8 @@ Sana verilen bu test / sınav sayfası görselindeki (${sinavTuru}) BASILI GERÇ
 7. MEB Kazanım Kodu ve Açıklaması: Resmi MEB kazanım kodu ve tam açıklaması.
 8. Çözüm Detayı (cozumDetayi): Sorunun tam, adım adım matematiksel/mantıksal çözümü (LaTeX $...$ kullanarak).
 9. ŞIKLI SORULARDA İŞARETLENEN ŞIK:
-   - Daire içine alınan, boyanan veya yanına tik (✓) konan şık = isaretlenenSik (A, B, C, D, E).
-   - Öğrenci hiçbir şıkkı işaretlememişse: isaretlenenSik: "Boş", ogrenciCevabi: "Boş", dogruMu: false.
+   - Öğrencinin kurşun/tükenmez kalemle daire içine aldığı, boyadığı/karaladığı, yanına tik (✓) koyduğu, altını çizdiği veya soru yanına el yazısıyla yazdığı şıkkı ("A", "B", "C", "D", "E") 'isaretlenenSik' olarak oku (Örn: "B"). Asla öğrencinin işaretlediği soruyu boş geçme!
+   - Sadece sayfada gerçekten hiçbir işaretleme, seçim veya karalama yoksa: isaretlenenSik: "Boş", ogrenciCevabi: "Boş", dogruMu: false.
 10. BOŞLUK DOLDURMA VE AÇIK UÇLU SORULAR:
     - Şık olmadığı için isaretlenenSik alanına "-" ver.
     - ogrenciCevabi: Öğrencinin boşluğa veya soru alanına el yazısıyla yazdığı ifade/kelime/sayı. Öğrenci boş bırakmışsa "Boş".
@@ -4022,9 +4021,10 @@ KRİTİK KURALLAR:
 9. MEB Kazanım Kodu ve Açıklaması: Resmi MEB kazanım kodu ve tam açıklaması.
 10. Çözüm Detayı (cozumDetayi): Sorunun tam, adım adım matematiksel/mantıksal çözümü (LaTeX $...$ kullanarak).
 11. ŞIKLI SORULARDA İŞARETLENEN ŞIKKI BULMA KURALLARI:
-    - DAİRE/ÇEMBER İÇİNE ALINAN, BOYALAN VEYA YANINA TİK (✓) KONAN ŞIK = ÖĞRENCİNİN İŞARETLEDİĞİ ŞIKTIR ("isaretlenenSik").
-    - ÜZERİNE ÇİZGİ ÇEKİLEN, ÇARPI (✗) KONAN VEYA ÜSTÜ ÇİZİLEN ŞIKLAR = ELENEN ŞIKLARDIR! Kesinlikle işaretlenen olarak ALMA!
-    - Öğrenci işlem yapmış olsa bile şıklardan hiçbirini daire içine almadıysa / işaretlemediyse isaretlenenSik: "Boş", ogrenciCevabi: "Boş" ver!
+    - Öğrencinin kurşun/tükenmez kalemle daire içine aldığı, boyadığı/karaladığı, yanına tik (✓) koyduğu, altını çizdiği veya soru yanına el yazısıyla yazdığı şıkkı ("A", "B", "C", "D", "E") 'isaretlenenSik' olarak oku (Örn: "B"). Asla öğrencinin işaretlediği bir soruyu boş geçme!
+    - Öğrenci soruyu çözüp bir şıkkı seçtiyse 'isaretlenenSik' ve 'ogrenciCevabi' alanına o şıkkın harfini yaz.
+    - Sadece sayfada gerçekten hiçbir işaretleme, seçim veya karalama yoksa isaretlenenSik: "Boş", ogrenciCevabi: "Boş" yaz.
+    - Üzerine çarpı (✗) veya düz çizgi çekilip elenmiş şıklar elenen şıklardır, öğrencinin nihai seçtiği şıkkı bul.
 12. BOŞLUK DOLDURMA VE AÇIK UÇLU SORULAR:
     - Şık olmadığı için isaretlenenSik alanına "Boş" veya null ver.
     - ogrenciCevabi: Öğrencinin boşluğa veya soru alanına el yazısıyla yazdığı ifade/kelime/sayı (Yazmamışsa "Boş").
