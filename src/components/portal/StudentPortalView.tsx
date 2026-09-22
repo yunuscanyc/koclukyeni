@@ -974,9 +974,16 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
                                         <ZoomOut className="w-3.5 h-3.5" />
                                       </button>
                                       <button
+                                        onClick={() => setStudentRotation((r) => (r - 90 + 360) % 360)}
+                                        className="p-1 text-slate-600 hover:text-slate-900 rounded-lg hover:bg-slate-200"
+                                        title="Sola 90° Döndür"
+                                      >
+                                        <RotateCcw className="w-3.5 h-3.5" />
+                                      </button>
+                                      <button
                                         onClick={() => setStudentRotation((r) => (r + 90) % 360)}
                                         className="p-1 text-slate-600 hover:text-slate-900 rounded-lg hover:bg-slate-200"
-                                        title="90° Döndür"
+                                        title="Sağa 90° Döndür"
                                       >
                                         <RotateCw className="w-3.5 h-3.5" />
                                       </button>
@@ -987,9 +994,9 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
                                           setStudentRotation(0);
                                         }}
                                         className="p-1 text-slate-600 hover:text-slate-900 rounded-lg hover:bg-slate-200"
-                                        title="Sıfırla"
+                                        title="Görünümü Sıfırla"
                                       >
-                                        <RotateCcw className="w-3.5 h-3.5" />
+                                        <RefreshCw className="w-3.5 h-3.5" />
                                       </button>
                                       <span className="text-[10px] font-bold text-slate-500 px-1.5">
                                         {Math.round(studentZoom * 100)}%
@@ -1633,9 +1640,16 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
                     <ZoomOut className="w-3.5 h-3.5" />
                   </button>
                   <button
+                    onClick={() => setModalRotation((r) => (r - 90 + 360) % 360)}
+                    className="p-1 text-slate-600 hover:text-slate-900 rounded-lg hover:bg-slate-100"
+                    title="Sola 90° Döndür"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                  </button>
+                  <button
                     onClick={() => setModalRotation((r) => (r + 90) % 360)}
                     className="p-1 text-slate-600 hover:text-slate-900 rounded-lg hover:bg-slate-100"
-                    title="90° Döndür"
+                    title="Sağa 90° Döndür"
                   >
                     <RotateCw className="w-3.5 h-3.5" />
                   </button>
@@ -1646,9 +1660,9 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
                       setModalRotation(0);
                     }}
                     className="p-1 text-slate-600 hover:text-slate-900 rounded-lg hover:bg-slate-100"
-                    title="Sıfırla"
+                    title="Görünümü Sıfırla"
                   >
-                    <RotateCcw className="w-3.5 h-3.5" />
+                    <RefreshCw className="w-3.5 h-3.5" />
                   </button>
                   <span className="text-[10px] font-bold text-slate-500 px-1">
                     {Math.round(modalZoom * 100)}%

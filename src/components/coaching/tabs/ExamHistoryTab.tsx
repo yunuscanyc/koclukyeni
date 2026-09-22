@@ -344,8 +344,11 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
     setPan({ x: 0, y: 0 });
     setRotation(0);
   };
-  const handleRotate = () => {
+  const handleRotateCw = () => {
     setRotation((prev) => (prev + 90) % 360);
+  };
+  const handleRotateCcw = () => {
+    setRotation((prev) => (prev - 90 + 360) % 360);
   };
 
   // Pan image with mouse & touch dragging
@@ -1019,18 +1022,25 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
                       <ZoomOut className="w-3.5 h-3.5" />
                     </button>
                     <button
-                      onClick={handleRotate}
+                      onClick={handleRotateCcw}
                       className="p-1 text-slate-600 hover:text-slate-900 rounded-lg hover:bg-slate-200"
-                      title="90° Döndür"
+                      title="Sola 90° Döndür"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={handleRotateCw}
+                      className="p-1 text-slate-600 hover:text-slate-900 rounded-lg hover:bg-slate-200"
+                      title="Sağa 90° Döndür"
                     >
                       <RotateCw className="w-3.5 h-3.5" />
                     </button>
                     <button
                       onClick={handleResetZoom}
                       className="p-1 text-slate-600 hover:text-slate-900 rounded-lg hover:bg-slate-200"
-                      title="Sıfırla"
+                      title="Görünümü Sıfırla"
                     >
-                      <RotateCcw className="w-3.5 h-3.5" />
+                      <RefreshCw className="w-3.5 h-3.5" />
                     </button>
                     <span className="text-[10px] font-bold text-slate-500 px-1.5">
                       {Math.round(zoom * 100)}%

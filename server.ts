@@ -3413,33 +3413,36 @@ function normalizeAndValidateQuestion(
     soruTuru = "dogru_yanlis";
   }
 
-  // Extract student choice / marking across all possible fields
-  const rawStudentMark = String(q.isaretlenenSik || q.ogrenciCevabi || q.studentAnswer || q.secenek || "").trim();
+  // Extract student choice / marking across separate fields without falsy fallback bugs
+  const rawStudentAns = q.ogrenciCevabi !== undefined && q.ogrenciCevabi !== null ? String(q.ogrenciCevabi).trim() : (q.studentAnswer ? String(q.studentAnswer).trim() : "");
+  const rawMark = q.isaretlenenSik !== undefined && q.isaretlenenSik !== null ? String(q.isaretlenenSik).trim() : (q.secenek ? String(q.secenek).trim() : "");
   const rawCorrectAnswer = String(q.dogruCevap || q.correctAnswer || q.cevap || "").trim();
 
-  const isExplicitlyBlank = (
-    !rawStudentMark ||
-    rawStudentMark.toLowerCase() === "boş" ||
-    rawStudentMark.toLowerCase() === "bos" ||
-    rawStudentMark.toLowerCase() === "unanswered" ||
-    rawStudentMark.toLowerCase() === "yok" ||
-    rawStudentMark.toLowerCase() === "null" ||
-    rawStudentMark === "-"
-  );
+  const isBlankValue = (v: string) => {
+    if (!v) return true;
+    const clean = v.toLowerCase();
+    return clean === "-" || clean === "boş" || clean === "bos" || clean === "unanswered" || clean === "yok" || clean === "null" || clean === "undefined";
+  };
 
   let isBlank = false;
   let isaretlenenSik = "";
   let ogrenciCevabi = "";
-  let dogruCevap = "";
+  let dogruCevap = rawCorrectAnswer || "A";
 
-  if (isExplicitlyBlank) {
+  const studentAnsIsBlank = isBlankValue(rawStudentAns);
+  const markIsBlank = isBlankValue(rawMark);
+
+  if (studentAnsIsBlank && markIsBlank) {
     isBlank = true;
     isaretlenenSik = "Boş";
     ogrenciCevabi = "Boş";
-    dogruCevap = rawCorrectAnswer || "A";
   } else {
-    // Check if there is a single option letter A, B, C, D, E
-    const optMatch = rawStudentMark.match(/^[A-E]$/i) || rawStudentMark.match(/^(?:seçenek|şık)?\s*([A-E])\b/i);
+    // At least one field has actual student answer or mark
+    const effectiveAnswer = !studentAnsIsBlank ? rawStudentAns : rawMark;
+    const effectiveMark = !markIsBlank ? rawMark : rawStudentAns;
+
+    // Check if there is an option letter A-E
+    const optMatch = effectiveMark.match(/^[A-E]$/i) || effectiveMark.match(/^(?:seçenek|şık)?\s*([A-E])\b/i) || effectiveAnswer.match(/^[A-E]$/i);
     const correctOptMatch = rawCorrectAnswer.match(/^[A-E]$/i) || rawCorrectAnswer.match(/^(?:seçenek|şık)?\s*([A-E])\b/i);
 
     if (optMatch && (soruTuru === "coktan_secmeli" || correctOptMatch)) {
@@ -3449,12 +3452,10 @@ function normalizeAndValidateQuestion(
       dogruCevap = correctOptMatch ? (correctOptMatch[1] || correctOptMatch[0]).toUpperCase() : (rawCorrectAnswer || "A");
       isBlank = false;
     } else {
-      // Student wrote a number (e.g. 12) or word or mathematical expression
-      if (soruTuru === "coktan_secmeli" && !correctOptMatch) {
-        soruTuru = "acik_uclu";
-      }
+      // Numerical / Open ended / text answer (e.g. 12, Fotosentez, etc.)
+      soruTuru = "acik_uclu";
       isaretlenenSik = optMatch ? (optMatch[1] || optMatch[0]).toUpperCase() : "-";
-      ogrenciCevabi = rawStudentMark;
+      ogrenciCevabi = effectiveAnswer;
       dogruCevap = rawCorrectAnswer || "Cevap";
       isBlank = false;
     }
@@ -3569,10 +3570,12 @@ Sana verilen bu test / sınav sayfası görselindeki (${sinavTuru}) BASILI GERÇ
 9. ŞIKLI SORULARDA İŞARETLENEN ŞIK:
    - Öğrencinin kurşun/tükenmez kalemle daire içine aldığı, boyadığı, yanına tik koyduğu veya yazdığı şıkkı ("A", "B", "C", "D", "E") 'isaretlenenSik' ve 'ogrenciCevabi' olarak oku.
    - Sadece sayfada gerçekten hiçbir işaretleme/seçim yoksa: isaretlenenSik: "Boş", ogrenciCevabi: "Boş", dogruMu: false.
-10. BOŞLUK DOLDURMA VE AÇIK UÇLU / SAYISAL SORULAR:
-    - Soru türü: "acik_uclu" veya "bosluk_doldurma".
-    - ogrenciCevabi: Öğrencinin soru altına veya boşluğa yazdığı sayı, sonuç veya kelime (Örn: "12", "Fotosentez", "42"). Yazmamışsa "Boş".
-    - dogruCevap: Beklenen doğru sonuç veya ifade (Örn: "12", "Fotosentez").
+10. BOŞLUK DOLDURMA, AÇIK UÇLU VE SAYISAL SORULARDA EL YAZISI TESPİTİ:
+    - Soru şıklı değilse veya öğrenci soru alanına el yazısıyla işlem/çözüm yapmışsa soruTuru: "acik_uclu" veya "bosluk_doldurma" olarak belirle.
+    - EL YAZISI VE SONUÇ: Sorunun altına, çözüm kutusuna, kenar boşluğuna veya soru metninin yanına öğrencinin kurşun/tükenmez kalemle yazdığı işlemleri, ulaştığı nihai sayıyı, daire/kutu içine aldığı sonucu veya kelimeyi (Örn: "12", "x=12", "Fotosentez", "42", "4/3") DİKKATLE OKU ve 'ogrenciCevabi' alanına yaz!
+    - Sayfada öğrencinin el yazısıyla yazdığı bir sayı/cevap varken ASLA "Boş" yazma!
+    - Yalnızca soru alanında ve kenarlarında öğrenciye ait HİÇBİR el yazısı veya işlem bulunmuyorsa ogrenciCevabi: "Boş" yaz.
+    - dogruCevap: Sorunun doğru çözümü/sonucu (Örn: "12", "Fotosentez").
     - isaretlenenSik: "-".
 11. Doğruluk (dogruMu):
     - Eğer öğrenci soruyu boş bırakmışsa false.
@@ -4090,10 +4093,12 @@ KRİTİK KURALLAR:
 11. ŞIKLI SORULARDA İŞARETLENEN ŞIK:
     - Öğrencinin kurşun/tükenmez kalemle daire içine aldığı, boyadığı, yanına tik koyduğu veya yazdığı şıkkı ("A", "B", "C", "D", "E") 'isaretlenenSik' ve 'ogrenciCevabi' olarak oku.
     - Sadece sayfada hiçbir işaretleme/seçim yoksa: isaretlenenSik: "Boş", ogrenciCevabi: "Boş", dogruMu: false.
-12. BOŞLUK DOLDURMA VE AÇIK UÇLU / SAYISAL SORULAR:
-    - Soru türü: "acik_uclu" veya "bosluk_doldurma".
-    - ogrenciCevabi: Öğrencinin soru altına veya boşluğa yazdığı sayı, sonuç veya kelime (Örn: "12", "Fotosentez", "42"). Yazmamışsa "Boş".
-    - dogruCevap: Beklenen doğru sonuç veya ifade (Örn: "12", "Fotosentez").
+12. BOŞLUK DOLDURMA, AÇIK UÇLU VE SAYISAL SORULARDA EL YAZISI TESPİTİ:
+    - Soru şıklı değilse veya öğrenci soru alanına el yazısıyla işlem/çözüm yapmışsa soruTuru: "acik_uclu" veya "bosluk_doldurma" olarak belirle.
+    - EL YAZISI VE SONUÇ: Sorunun altına, çözüm kutusuna, kenar boşluğuna veya soru metninin yanına öğrencinin kurşun/tükenmez kalemle yazdığı işlemleri, ulaştığı nihai sayıyı, daire/kutu içine aldığı sonucu veya kelimeyi (Örn: "12", "x=12", "Fotosentez", "42", "4/3") DİKKATLE OKU ve 'ogrenciCevabi' alanına yaz!
+    - Sayfada öğrencinin el yazısıyla yazdığı bir sayı/cevap varken ASLA "Boş" yazma!
+    - Yalnızca soru alanında ve kenarlarında öğrenciye ait HİÇBİR el yazısı veya işlem bulunmuyorsa ogrenciCevabi: "Boş" yaz.
+    - dogruCevap: Sorunun doğru çözümü/sonucu (Örn: "12", "Fotosentez").
     - isaretlenenSik: "-".
 13. Doğruluk (dogruMu):
     - Öğrenci cevabı doğruysa true, yanlışsa veya boşsa false.
