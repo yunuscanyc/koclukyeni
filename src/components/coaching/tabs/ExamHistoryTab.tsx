@@ -20,12 +20,15 @@ import {
   Hourglass,
   Clock,
   RefreshCw,
-  Download
+  Download,
+  Scissors,
+  Crop
 } from 'lucide-react';
 import { OgrenciSinavKaydi, SinavSorusu, DenemeSinavi } from '../../../types';
 import { retryExamAIAnalysis, markArchiveAsRead, getExamArchiveById, resetAndResolveExamAI } from '../../../lib/apiService';
 import { QuestionSolutionView } from '../QuestionSolutionView';
 import { formatDate } from '../../../utils/dateUtils';
+import { batchCropArchiveQuestions } from '../../../utils/imageCropper';
 
 interface ExamHistoryTabProps {
   archives: OgrenciSinavKaydi[];
@@ -62,6 +65,8 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [isDownloadingZip, setIsDownloadingZip] = useState(false);
   const [zipProgressText, setZipProgressText] = useState('');
+  const [isCropping, setIsCropping] = useState(false);
+  const [cropToastMessage, setCropToastMessage] = useState<string | null>(null);
 
   // Cache for on-demand loaded full archives with high-res base64 photos
   const [fullArchiveCache, setFullArchiveCache] = useState<Record<string, OgrenciSinavKaydi>>({});
@@ -230,6 +235,64 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
     } finally {
       setIsDownloadingZip(false);
       setTimeout(() => setZipProgressText(''), 1000);
+    }
+  };
+
+  const handleCropAllQuestions = async () => {
+    if (!activeArchive) return;
+    let photos = activeArchive.sayfaFotolari || activeArchive.fotografYollari || [];
+    
+    // If photos are empty strings, load full archive first
+    const hasFull = photos.some((p: any) => typeof p === 'string' ? p.length > 500 : Boolean(p?.imageBase64 && p.imageBase64.length > 500));
+    if (!hasFull) {
+      setCropToastMessage('Fotoğraflar sunucudan alınıyor...');
+      try {
+        const fullArch = await getExamArchiveById(activeArchive.id);
+        if (fullArch && (fullArch.sayfaFotolari?.length || fullArch.fotografYollari?.length)) {
+          photos = fullArch.sayfaFotolari || fullArch.fotografYollari || [];
+          setFullArchiveCache((prev) => ({ ...prev, [activeArchive.id]: fullArch }));
+        }
+      } catch (err) {
+        console.warn('Full archive fetch error for crop:', err);
+      }
+    }
+
+    const validPhotos = photos.filter((p: any) => 
+      (typeof p === 'string' && p.length > 50) || Boolean(p?.imageBase64 && p.imageBase64.length > 50)
+    ).map((p: any) => typeof p === 'string' ? p : p?.imageBase64 || '');
+
+    if (validPhotos.length === 0) {
+      setCropToastMessage('Bu sınav için geçerli sayfa fotoğrafı bulunamadı.');
+      setTimeout(() => setCropToastMessage(null), 3500);
+      return;
+    }
+
+    setIsCropping(true);
+    setCropToastMessage('Sorular sayfa fotoğraflarından tek tek ayrıştırılıyor...');
+
+    try {
+      const croppedSorular = await batchCropArchiveQuestions(validPhotos, activeArchive.sorular || []);
+      const updatedArchive: OgrenciSinavKaydi = {
+        ...activeArchive,
+        sorular: croppedSorular,
+      };
+
+      setFullArchiveCache((prev) => ({
+        ...prev,
+        [activeArchive.id]: updatedArchive,
+      }));
+
+      if (onSaveExamArchive) {
+        onSaveExamArchive(updatedArchive);
+      }
+
+      setCropToastMessage(`${croppedSorular.length} adet soru başarıyla ayrıştırıldı ve görselleri hazırlandı!`);
+    } catch (err: any) {
+      console.warn('Crop questions error:', err);
+      setCropToastMessage('Soru ayrıştırma sırasında bir hata oluştu.');
+    } finally {
+      setIsCropping(false);
+      setTimeout(() => setCropToastMessage(null), 4000);
     }
   };
 
@@ -421,6 +484,27 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
           ...q,
           cozumDetayi: newSolution,
           cozum: newSolution,
+        };
+      }
+      return q;
+    });
+
+    const updatedArchive: OgrenciSinavKaydi = {
+      ...activeArchive,
+      sorular: updatedSorular,
+    };
+
+    onSaveExamArchive(updatedArchive);
+  };
+
+  const handleSaveQuestionCrop = (questionNo: number, newCroppedBase64: string, newKutu: [number, number, number, number]) => {
+    if (!activeArchive || !onSaveExamArchive) return;
+    const updatedSorular = (activeArchive.sorular || []).map((q) => {
+      if (q.soruNo === questionNo) {
+        return {
+          ...q,
+          soruFotografYolu: newCroppedBase64,
+          kutu: newKutu,
         };
       }
       return q;
@@ -1011,14 +1095,38 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
                 return null;
               })()}
 
+              {/* Crop Toast Notification */}
+              {cropToastMessage && (
+                <div className="p-3 rounded-2xl bg-indigo-900 text-white border border-indigo-700 flex items-center justify-between gap-3 shadow-lg animate-in fade-in duration-200">
+                  <div className="flex items-center gap-2.5">
+                    <Scissors className="w-4 h-4 text-amber-400 shrink-0 animate-pulse" />
+                    <span className="text-xs font-bold">{cropToastMessage}</span>
+                  </div>
+                </div>
+              )}
+
               {/* Page Photos Viewer with Zoom & Pan */}
               <div className="space-y-3">
-                <div className="flex items-center justify-between">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
                     <Camera className="w-4 h-4 text-indigo-600" />
                     <span className="text-xs font-bold text-slate-900">
                       Kitapçık Sayfası Fotoğrafı ({activeArchive.sayfaFotolari?.length || 0} Sayfa)
                     </span>
+                    <button
+                      type="button"
+                      onClick={handleCropAllQuestions}
+                      disabled={isCropping}
+                      className="ml-2 px-3 py-1 rounded-xl bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white font-bold text-xs shadow-xs transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                      title="Fotoğraflardaki her bir soruyu tek tek kırp ve görsellerini hazırla"
+                    >
+                      {isCropping ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Scissors className="w-3.5 h-3.5 text-indigo-200" />
+                      )}
+                      <span>Soru Soru Ayrıştır</span>
+                    </button>
                   </div>
 
                   {/* Zoom controls */}
@@ -1345,6 +1453,10 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
                           durum={isDogru ? 'dogru' : (isBlank ? 'bos' : 'yanlis')}
                           canEdit={Boolean(onSaveExamArchive)}
                           onSaveSolution={(newSol) => handleSaveQuestionSolution(q.soruNo, newSol)}
+                          soruFotografYolu={q.soruFotografYolu}
+                          pagePhoto={activeArchive.sayfaFotolari?.[(q.sayfaNo || 1) - 1] || activeArchive.sayfaFotolari?.[0]}
+                          kutu={q.kutu}
+                          onSaveCrop={(newCrop, newKutu) => handleSaveQuestionCrop(q.soruNo, newCrop, newKutu)}
                         />
                       </div>
                     );

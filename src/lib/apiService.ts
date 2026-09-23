@@ -328,6 +328,33 @@ export async function toggleAssignedResourceCompleted(id: string, completed: boo
   });
 }
 
+// 12. PRECISION QUESTION CROPPING & BOUNDING BOX DETECTION
+export async function detectQuestionBoxes(
+  imageBase64: string,
+  targetQuestions?: Array<{ soruNo: number; ders?: string; konu?: string }>
+): Promise<Array<{ soruNo: number; kutu: [number, number, number, number] }>> {
+  try {
+    const res = await fetchApi<{ success: boolean; boxes: Array<{ soruNo: number; kutu: [number, number, number, number] }> }>(
+      '/api/ai/detect-question-boxes',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          imageBase64,
+          mimeType: 'image/jpeg',
+          targetQuestions: targetQuestions || [],
+        }),
+      }
+    );
+    if (res && res.success && Array.isArray(res.boxes)) {
+      return res.boxes;
+    }
+    return [];
+  } catch (err) {
+    console.warn('detectQuestionBoxes API error:', err);
+    return [];
+  }
+}
+
 // No-op placeholder, as Express backend handles initialization and seeding automatically on server startup
 export async function seedDatabaseIfEmpty(): Promise<void> {
   return Promise.resolve();

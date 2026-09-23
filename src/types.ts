@@ -128,6 +128,7 @@ export interface SoruAnalizDetay {
   analizNotu?: string;
   sayfaFotoUrl?: string;
   soruFotografYolu?: string; // base64 or photo URL
+  kutu?: [number, number, number, number]; // [ymin, xmin, ymax, xmax] percentage coordinates
 }
 
 export type AIProcessingStatus = 'pending' | 'processing' | 'completed' | 'rate_limited' | 'error';

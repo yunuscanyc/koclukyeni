@@ -3515,6 +3515,12 @@ function normalizeAndValidateQuestion(
 
   const parsedDers = typeof q.ders === "string" && q.ders.trim() ? q.ders.trim() : fallbackDers;
 
+  let kutu: [number, number, number, number] | undefined = undefined;
+  if (Array.isArray(q.kutu) && q.kutu.length === 4) {
+    const [ymin, xmin, ymax, xmax] = q.kutu.map((n: any) => Number(n) || 0);
+    kutu = [ymin, xmin, ymax, xmax];
+  }
+
   return {
     soruNo,
     soruTuru,
@@ -3534,6 +3540,7 @@ function normalizeAndValidateQuestion(
     analizNotu,
     sayfaFotoUrl: "",
     soruFotografYolu: "",
+    kutu,
   };
 }
 
@@ -3602,11 +3609,17 @@ Sana verilen bu test / sınav sayfası görselindeki (${sinavTuru}) BASILI GERÇ
     - Eğer öğrenci soruyu boş bırakmışsa false.
     - Öğrencinin cevabı doğruysa true, yanlışsa false.
 12. Analiz Notu: Duruma dair kısa pedagojik açıklama.
+13. Soru Kırpma Alanı / Bounding Box (kutu):
+    - Sorunun sayfadaki tam sınırları: [ymin, xmin, ymax, xmax] (0-1000 standardında tam sayı koordinatlar).
+    - ÜST SINIR (ymin): Soru numarasının başladığı yer (asla önceki sorunun C, D, E şıklarını dahil etme!).
+    - ALT SINIR (ymax): Sorunun EN SON şıkkının (E şıkkı) bittiği yer (şıkları asla yarıda kesme, alttaki sonraki soruya taşma!).
+    - SÜTUN DUVARI (xmin, xmax): Sol sütundaki soru sağ sütuna taşmaz; sağ sütundaki soru sol sütuna taşmaz.
 
 Yanıt formatı SADECE geçerli bir JSON dizisi olmalıdır:
 [
   {
     "soruNo": 1,
+    "kutu": [45, 25, 450, 485],
     "soruTuru": "coktan_secmeli",
     "ders": "Matematik (TYT)",
     "unite": "Fonksiyonlar",
@@ -3622,6 +3635,7 @@ Yanıt formatı SADECE geçerli bir JSON dizisi olmalıdır:
   },
   {
     "soruNo": 2,
+    "kutu": [45, 510, 480, 970],
     "soruTuru": "acik_uclu",
     "ders": "Fizik (AYT)",
     "unite": "Kuvvet ve Hareket",
@@ -3679,6 +3693,149 @@ Yanıt formatı SADECE geçerli bir JSON dizisi olmalıdır:
       source: "simulated-analysis-fallback",
       sorular: matched,
       warning: "Optik analiz fallback modu ile tamamlandı: " + (error?.message || ""),
+    });
+  }
+});
+
+// =========================================================================
+// 2.0.1 HASSAS TEKİL SORU SINIR / BOUNDING BOX TESPİTİ (GEMINI VISION)
+// =========================================================================
+app.post("/api/ai/detect-question-boxes", async (req, res) => {
+  try {
+    const { imageBase64, mimeType = "image/jpeg", targetQuestions = [] } = req.body;
+    if (!imageBase64) {
+      return res.status(400).json({ error: "Görsel verisi (imageBase64) zorunludur." });
+    }
+
+    const ai = getGeminiClient();
+    const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, "");
+
+    if (!ai) {
+      return res.json({
+        success: false,
+        boxes: [],
+        message: "Gemini API anahtarı ayarlanmamış.",
+      });
+    }
+
+    const questionHint = Array.isArray(targetQuestions) && targetQuestions.length > 0
+      ? `Bu sayfada aranan veya tespit edilmiş soru numaraları: ${targetQuestions.map((t: any) => t.soruNo).filter(Boolean).join(", ")}.`
+      : "";
+
+    const prompt = `
+GÖREV:
+Sana verilen test / kitap sayfası görselindeki GERÇEK BASILI HER BİR SORUNUN kesin ve kusursuz sınırlarını (Bounding Box) tespit et.
+${questionHint}
+
+ÇOK ÖNEMLİ VE HASSAS KESİN SINIR KURALLARI:
+1. ANKOR METİNLERLE SINIRLAMA (Grounding):
+   - Her soru için;
+     * "baslangicMetni": Sorunun ilk kelimeleri (örn: "10. Edebiyat kuramları...")
+     * "bitisMetni": Sorunun EN SON ŞIKKI veya cevabı (örn: "E) Bir estetik metoda...")
+   - Bu sayede sorunun nerede başlayıp nerede bittiği şaşmaz.
+
+2. ÜST SINIR (ymin) - ÖNCEKİ SORUNUN ŞIKLARINI KESİNLİKLE DAHİL ETME:
+   - Sorunun başlangıcı, basılı soru numarasının (örn: "8.", "10.", "11.") veya o soruya ait "ÖSYM KÖŞESİ" başlığının hemen üstüdür.
+   - KESİNLİKLE bir önceki sorunun şıklarını (C, D, E gibi) veya metnini İÇERMEMELİDİR! ymin değerini tam o sorunun başladığı hizaya koy.
+
+3. ALT SINIR (ymax) - ŞIKLARI ASLA YARIDA KESME VE SONRAKİ SORUYA TAŞMA:
+   - Sorunun paragraf metni, soru kökü ("Bu parçaya göre...") ve BÜTÜN SEÇENEKLERİ (A, B, C, D, E) tek bir sorunun ayrılmaz parçasıdır.
+   - ymax değeri, sorunun EN SON şıkkının (genellikle E şıkkının) veya el yazısı çözümünün alt kenarında bitmelidir. Şıkları asla yarıda kesme (örn: A, B'yi alıp C, D, E'yi dışarıda bırakma!).
+   - Aynı zamanda, alttaki SONRAKİ sorunun (örn: 9., 12. soru) başlığına veya metnine KESİNLİKLE TAŞMA!
+
+4. SOL ve SAĞ SINIRLAR (xmin, xmax) - SÜTUN DUVARI / AYRIMI:
+   - Test sayfaları 2 sütunlu (Sol sütun, Sağ sütun) veya 3 sütunludur.
+   - Sol sütundaki soru (örn: Soru 10, 11): xmin sol kenardan başlar, xmax iki sütunun arasındaki orta dikey boşlukta (kolon ayrımında) biter. Sağ sütundaki soruları (örn: Soru 12, 13) KESİNLİKLE İÇİNE ALMAZ!
+   - Sağ sütundaki soru (örn: Soru 12, 13): xmin orta dikey boşluktan başlar, xmax sağ kenarda biter. Sol sütundaki soruları KESİNLİKLE İÇİNE ALMAZ!
+
+5. YARIM VE KESİK SORULARI ÇIKAR:
+   - Kenarlarda yarısı kesilmiş veya tamamı görünmeyen soruları kutulamaya dahil etme.
+
+6. KOORDİNAT STANDARDI:
+   - [ymin, xmin, ymax, xmax] formatında 0-1000 standardında tamsayılar döndür (0: en üst/en sol, 1000: en alt/en sağ).
+
+Yanıt formatı SADECE geçerli bir JSON dizisi olmalıdır:
+[
+  {
+    "soruNo": 10,
+    "sutun": "sol",
+    "baslangicMetni": "10. Edebiyat kuramları...",
+    "bitisMetni": "E) Bir estetik metoda...",
+    "kutu": [35, 25, 420, 485]
+  },
+  {
+    "soruNo": 11,
+    "sutun": "sol",
+    "baslangicMetni": "11. Özgünlük genellikle...",
+    "bitisMetni": "E) ...",
+    "kutu": [440, 25, 960, 485]
+  }
+]
+`;
+
+    const { text: rawText } = await executeVisionWithFallback(ai, {
+      prompt,
+      mimeType,
+      cleanBase64,
+      temperature: 0.1,
+    });
+
+    let cleanText = rawText.trim();
+    const ilk = cleanText.indexOf("[");
+    const son = cleanText.lastIndexOf("]");
+    if (ilk >= 0 && son > ilk) {
+      cleanText = cleanText.substring(ilk, son + 1);
+    }
+
+    let parsed = JSON.parse(cleanText);
+    if (!Array.isArray(parsed)) {
+      parsed = [];
+    }
+
+    const boxes = parsed.map((item: any) => {
+      let kutu: [number, number, number, number] | null = null;
+      if (Array.isArray(item.kutu) && item.kutu.length === 4) {
+        let [ymin, xmin, ymax, xmax] = item.kutu.map((n: any) => Math.max(0, Math.min(1000, Number(n) || 0)));
+        
+        // Option Protection: If height is less than 200 (20% of page), expand ymax to ensure choices C, D, E aren't cut
+        const h = ymax - ymin;
+        if (h < 200 && ymax < 920) {
+          ymax = Math.min(970, ymax + Math.max(60, 220 - h));
+        }
+
+        // Column Wall Protection: ensure xmin and xmax don't span full page on multi-column
+        if (item.sutun === "sol" && xmax > 520) {
+          xmax = 490;
+        } else if (item.sutun === "sag" && xmin < 480) {
+          xmin = 505;
+        }
+
+        kutu = [ymin, xmin, ymax, xmax];
+      }
+      return {
+        soruNo: Number(item.soruNo) || 0,
+        sutun: item.sutun || "sol",
+        kutu,
+      };
+    }).filter((b: any) => {
+      if (b.soruNo <= 0 || !b.kutu) return false;
+      const [ymin, xmin, ymax, xmax] = b.kutu;
+      // Filter out tiny ghost fragments
+      const h = ymax - ymin;
+      const w = xmax - xmin;
+      return h >= 50 && w >= 80;
+    });
+
+    res.json({
+      success: true,
+      boxes,
+    });
+  } catch (err: any) {
+    console.warn("Detect question boxes error:", err);
+    res.json({
+      success: false,
+      boxes: [],
+      error: err?.message || "Kutu tespiti başarısız oldu.",
     });
   }
 });
@@ -4127,11 +4284,18 @@ KRİTİK KURALLAR:
 14. Doğruluk (dogruMu):
     - Öğrenci cevabı doğruysa true, yanlışsa veya boşsa false.
 15. Analiz Notu: Duruma dair kısa pedagojik açıklama.
+16. Soru Kırpma Alanı / Bounding Box (kutu):
+    - Sorunun sayfadaki tam sınırları: [ymin, xmin, ymax, xmax] (0-1000 standardında koordinatlar).
+    - ÇOK ÖNEMLİ (SÜTUN DİKKATİ): Test kitapları genellikle 2 veya 3 sütunludur.
+    - Eğer soru SOL sütundaysa xmin ve xmax SADECE sol sütunu kapsamalıdır (örn: [60, 35, 480, 485]). Yanındaki sağ sütunu veya diğer soruları KESİNLİKLE dahil etme!
+    - Eğer soru SAĞ sütundaysa xmin ve xmax SADECE sağ sütunu kapsamalıdır (örn: [60, 500, 520, 960]). Soldaki soruları dahil etme!
+    - Soru numarasıyla başlar, soru kökü, şekil/grafik ve şıklar/cevap alanı bitene kadar olan alanı hassasça çevreler.
 
 Yanıt formatı SADECE geçerli bir JSON dizisi olmalıdır:
 [
   {
     "soruNo": 1,
+    "kutu": [55, 30, 480, 480],
     "soruTuru": "coktan_secmeli",
     "ders": "Matematik (TYT)",
     "unite": "Fonksiyonlar",
@@ -4147,6 +4311,7 @@ Yanıt formatı SADECE geçerli bir JSON dizisi olmalıdır:
   },
   {
     "soruNo": 2,
+    "kutu": [55, 500, 520, 960],
     "soruTuru": "acik_uclu",
     "ders": "Fizik (AYT)",
     "unite": "Kuvvet ve Hareket",

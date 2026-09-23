@@ -41,7 +41,8 @@ import {
   MessageSquare,
   Flame,
   ArrowRight,
-  Download
+  Download,
+  Scissors
 } from 'lucide-react';
 import { Student, OgrenciSinavKaydi, Kazanim, SoruAnalizDetay, CoachNote, WeeklyScheduleTask, SoruTakipKaydi, DenemeSinavi, StudentAssignedResource, BookDifficulty } from '../../types';
 import { StudentTestUploadModal } from './StudentTestUploadModal';
@@ -52,6 +53,7 @@ import { WeeklyScheduleTab } from '../coaching/tabs/WeeklyScheduleTab';
 import { QuestionsTab } from '../coaching/tabs/QuestionsTab';
 import { CurriculumExplorer } from '../coaching/CurriculumExplorer';
 import { formatDate } from '../../utils/dateUtils';
+import { batchCropArchiveQuestions } from '../../utils/imageCropper';
 
 interface StudentPortalViewProps {
   student: Student;
@@ -118,6 +120,7 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
   const [studentArchiveCache, setStudentArchiveCache] = useState<Record<string, OgrenciSinavKaydi>>({});
   const [isDownloadingStudentZip, setIsDownloadingStudentZip] = useState(false);
   const [studentZipProgress, setStudentZipProgress] = useState('');
+  const [isStudentCropping, setIsStudentCropping] = useState(false);
 
   const showPortalToast = (text: string, type: 'success' | 'info' | 'error' = 'success') => {
     setPortalToast({ text, type });
@@ -259,6 +262,66 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
       showPortalToast('Sıfırlama sırasında bağlantı hatası oluştu.', 'error');
     } finally {
       setTimeout(() => setRetryingArchiveId(null), 1500);
+    }
+  };
+
+  const handleStudentCropAllQuestions = async (archive: OgrenciSinavKaydi) => {
+    if (!archive) return;
+    let photos = archive.sayfaFotolari || archive.fotografYollari || [];
+    
+    // If photos are empty strings, load full archive first
+    const hasFull = photos.some((p: any) => typeof p === 'string' ? p.length > 500 : Boolean(p?.imageBase64 && p.imageBase64.length > 500));
+    if (!hasFull) {
+      showPortalToast('Fotoğraflar sunucudan alınıyor...', 'info');
+      try {
+        const fullArch = await getExamArchiveById(archive.id);
+        if (fullArch && (fullArch.sayfaFotolari?.length || fullArch.fotografYollari?.length)) {
+          photos = fullArch.sayfaFotolari || fullArch.fotografYollari || [];
+          setStudentArchiveCache((prev) => ({ ...prev, [archive.id]: fullArch }));
+        }
+      } catch (err) {
+        console.warn('Full archive fetch error for crop:', err);
+      }
+    }
+
+    const validPhotos = photos.filter((p: any) => 
+      (typeof p === 'string' && p.length > 50) || Boolean(p?.imageBase64 && p.imageBase64.length > 50)
+    ).map((p: any) => typeof p === 'string' ? p : p?.imageBase64 || '');
+
+    if (validPhotos.length === 0) {
+      showPortalToast('Bu sınav için geçerli sayfa fotoğrafı bulunamadı.', 'error');
+      return;
+    }
+
+    setIsStudentCropping(true);
+    showPortalToast('Sorular sayfa fotoğraflarından tek tek ayrıştırılıyor...', 'info');
+
+    try {
+      const croppedSorular = await batchCropArchiveQuestions(validPhotos, archive.sorular || []);
+      const updatedArchive: OgrenciSinavKaydi = {
+        ...archive,
+        sorular: croppedSorular,
+      };
+
+      setStudentArchiveCache((prev) => ({
+        ...prev,
+        [archive.id]: updatedArchive,
+      }));
+
+      if (selectedArchive?.id === archive.id) {
+        setSelectedArchive(updatedArchive);
+      }
+
+      if (onSaveExamArchive) {
+        onSaveExamArchive(updatedArchive);
+      }
+
+      showPortalToast(`${croppedSorular.length} adet soru başarıyla ayrıştırıldı!`, 'success');
+    } catch (err: any) {
+      console.warn('Student crop questions error:', err);
+      showPortalToast('Soru ayrıştırma sırasında bir hata oluştu.', 'error');
+    } finally {
+      setIsStudentCropping(false);
     }
   };
 
@@ -966,6 +1029,22 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
                                       <span>{isDownloadingStudentZip ? (studentZipProgress || 'İndiriliyor...') : `Fotoğrafları İndir (${studentExamPhotos.length || (arch as any).photosCount || 0} Sayfa .ZIP)`}</span>
                                     </button>
 
+                                    {/* Soru Soru Ayrıştır button */}
+                                    <button
+                                      type="button"
+                                      onClick={() => handleStudentCropAllQuestions(arch)}
+                                      disabled={isStudentCropping}
+                                      className="px-3 py-1 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white border border-indigo-600 text-[11px] font-bold transition-all flex items-center gap-1.5 shadow-xs disabled:opacity-50 cursor-pointer"
+                                      title="Fotoğraflardaki soruları tek tek ayrıştır ve görsellerini hazırla"
+                                    >
+                                      {isStudentCropping ? (
+                                        <Loader2 className="w-3 h-3 animate-spin text-white" />
+                                      ) : (
+                                        <Scissors className="w-3 h-3 text-indigo-200" />
+                                      )}
+                                      <span>Soru Soru Ayrıştır</span>
+                                    </button>
+
                                     {/* Tekrar Çöz (Resimleri Silme) button */}
                                     <button
                                       onClick={() => handleStudentResetAndResolve(arch)}
@@ -1244,6 +1323,9 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
                                           dogruMu={isDogru}
                                           durum={isDogru ? 'dogru' : (isBlank ? 'bos' : 'yanlis')}
                                           canEdit={false}
+                                          soruFotografYolu={q.soruFotografYolu}
+                                          pagePhoto={arch.sayfaFotolari?.[(q.sayfaNo || 1) - 1] || arch.sayfaFotolari?.[0] || arch.fotografYollari?.[(q.sayfaNo || 1) - 1] || arch.fotografYollari?.[0]}
+                                          kutu={q.kutu}
                                         />
                                       </div>
                                     );
