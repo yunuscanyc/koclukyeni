@@ -9,7 +9,8 @@ import {
   ChevronDown,
   BookOpen,
   LogOut,
-  ShieldCheck
+  ShieldCheck,
+  Cpu
 } from 'lucide-react';
 import { Student, MainViewMode } from '../../types';
 import { PWAInstallButton } from '../pwa/PWAInstallButton';
@@ -29,6 +30,7 @@ interface CoachingHeaderProps {
   onLogout: () => void;
   onMarkAllAsRead?: () => void;
   onOpenCoachPinModal?: () => void;
+  onOpenYoloModal?: () => void;
 }
 
 export const CoachingHeader: React.FC<CoachingHeaderProps> = ({
@@ -46,6 +48,7 @@ export const CoachingHeader: React.FC<CoachingHeaderProps> = ({
   onLogout,
   onMarkAllAsRead,
   onOpenCoachPinModal,
+  onOpenYoloModal,
 }) => {
   return (
     <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200/80 shadow-2xs">
@@ -164,6 +167,17 @@ export const CoachingHeader: React.FC<CoachingHeaderProps> = ({
               <span className="text-[10px] font-bold text-indigo-600 bg-white/80 px-1.5 py-0.5 rounded border border-indigo-200/80 ml-1">Değiştir</span>
             </button>
 
+            {/* Yerel YOLO & Ubuntu Servisi Button */}
+            <button
+              type="button"
+              onClick={onOpenYoloModal}
+              className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 border border-slate-200 text-xs font-semibold text-slate-800 shadow-2xs transition-all cursor-pointer group"
+              title="Yerel YOLO ve Ubuntu Soru Tespit Servisi Ayarları"
+            >
+              <Cpu className="w-3.5 h-3.5 text-indigo-600 group-hover:rotate-12 transition-transform" />
+              <span>Yerel YOLO</span>
+            </button>
+
             {/* AI Coach Assistant Button */}
             <button
               onClick={onOpenAiAsk}
@@ -276,7 +290,19 @@ export const CoachingHeader: React.FC<CoachingHeaderProps> = ({
             ))}
           </div>
 
-          <div className="pt-2 border-t border-slate-200 flex items-center justify-between">
+          <div className="pt-2 border-t border-slate-200 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                onToggleMobileMenu();
+                onOpenYoloModal?.();
+              }}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 border border-slate-200 text-xs font-bold text-slate-800"
+            >
+              <Cpu className="w-3.5 h-3.5 text-indigo-600" />
+              <span>Yerel YOLO / Ubuntu Servisi</span>
+            </button>
+
             <button
               type="button"
               onClick={() => {

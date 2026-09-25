@@ -22,10 +22,11 @@ import {
   RefreshCw,
   Download,
   Scissors,
-  Crop
+  Crop,
+  Cpu
 } from 'lucide-react';
 import { OgrenciSinavKaydi, SinavSorusu, DenemeSinavi } from '../../../types';
-import { retryExamAIAnalysis, markArchiveAsRead, getExamArchiveById, resetAndResolveExamAI } from '../../../lib/apiService';
+import { retryExamAIAnalysis, markArchiveAsRead, getExamArchiveById, resetAndResolveExamAI, saveExamArchive } from '../../../lib/apiService';
 import { QuestionSolutionView } from '../QuestionSolutionView';
 import { formatDate } from '../../../utils/dateUtils';
 import { batchCropArchiveQuestions } from '../../../utils/imageCropper';
@@ -35,6 +36,7 @@ interface ExamHistoryTabProps {
   onDeleteArchive: (id: string) => void;
   studentName: string;
   onSaveExamArchive?: (archive: OgrenciSinavKaydi, newDeneme?: Omit<DenemeSinavi, 'id'> | DenemeSinavi) => void;
+  onOpenYoloModal?: () => void;
 }
 
 export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
@@ -42,6 +44,7 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
   onDeleteArchive,
   studentName,
   onSaveExamArchive,
+  onOpenYoloModal,
 }) => {
   const [selectedArchiveId, setSelectedArchiveId] = useState<string | null>(
     archives[0]?.id || null
@@ -267,14 +270,59 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
       return;
     }
 
+    // Kullanıcı Talimatı: Soruları tek tek ayır dediğinde daha önceden çözülmüş de olsa tüm soruları silsin!
+    const determinedDers = activeArchive.sorular?.find(q => q.ders && q.ders !== 'Genel')?.ders || (activeArchive.sinavTuru === 'AYT' ? 'Matematik' : 'Temel Matematik');
+
+    const clearedArchive: OgrenciSinavKaydi = {
+      ...activeArchive,
+      sorular: [],
+      toplamSoru: 0,
+      dogruSayisi: 0,
+      yanlisSayisi: 0,
+      bosSayisi: 0,
+      net: 0,
+      aiStatus: 'processing',
+      forceReset: true,
+    };
+
+    setFullArchiveCache((prev) => ({
+      ...prev,
+      [activeArchive.id]: clearedArchive,
+    }));
+
+    if (onSaveExamArchive) {
+      onSaveExamArchive(clearedArchive);
+    }
+    try {
+      await saveExamArchive(clearedArchive);
+    } catch (saveErr) {
+      console.warn('Cleared archive save error:', saveErr);
+    }
+
     setIsCropping(true);
-    setCropToastMessage('Sorular sayfa fotoğraflarından tek tek ayrıştırılıyor...');
+    setCropToastMessage('Daha önce çözülmüş tüm sorular silindi! Sayfalardaki sorular sıfırdan ayrıştırılıyor...');
 
     try {
-      const croppedSorular = await batchCropArchiveQuestions(validPhotos, activeArchive.sorular || []);
+      const croppedSorular = await batchCropArchiveQuestions(
+        validPhotos,
+        [],
+        (msg) => setCropToastMessage(msg),
+        {
+          resetAllQuestions: true,
+          defaultDers: determinedDers,
+        }
+      );
+
       const updatedArchive: OgrenciSinavKaydi = {
         ...activeArchive,
         sorular: croppedSorular,
+        toplamSoru: croppedSorular.length,
+        dogruSayisi: 0,
+        yanlisSayisi: 0,
+        bosSayisi: croppedSorular.length,
+        net: 0,
+        aiStatus: 'completed',
+        forceReset: true,
       };
 
       setFullArchiveCache((prev) => ({
@@ -285,8 +333,13 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
       if (onSaveExamArchive) {
         onSaveExamArchive(updatedArchive);
       }
+      try {
+        await saveExamArchive(updatedArchive);
+      } catch (saveErr) {
+        console.warn('Updated archive save error:', saveErr);
+      }
 
-      setCropToastMessage(`${croppedSorular.length} adet soru başarıyla ayrıştırıldı ve görselleri hazırlandı!`);
+      setCropToastMessage(`Daha önceki tüm sorular silindi ve ${croppedSorular.length} adet yeni soru sıfırdan ayrıştırıldı!`);
     } catch (err: any) {
       console.warn('Crop questions error:', err);
       setCropToastMessage('Soru ayrıştırma sırasında bir hata oluştu.');
@@ -842,6 +895,35 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
                     );
                   })()}
 
+                  {/* Soruları Tek Tek Ayır (Kırp) Butonu */}
+                  <button
+                    type="button"
+                    onClick={handleCropAllQuestions}
+                    disabled={isCropping}
+                    className="px-2.5 py-1.5 rounded-xl border border-violet-200 bg-violet-50/90 hover:bg-violet-100 text-violet-900 text-xs font-bold flex items-center gap-1.5 transition-all shadow-2xs active:scale-95 disabled:opacity-50 cursor-pointer"
+                    title="YOLO veya yapay zekâ ile sayfadaki tüm soruları tek tek kırpıp ayrıştırır ve her soruya kendi fotoğrafını ekler"
+                  >
+                    {isCropping ? (
+                      <Loader2 className="w-3.5 h-3.5 text-violet-600 animate-spin" />
+                    ) : (
+                      <Scissors className="w-3.5 h-3.5 text-violet-600" />
+                    )}
+                    <span>{isCropping ? 'Sorular Ayrıştırılıyor...' : '✂️ Soruları Tek Tek Ayır'}</span>
+                  </button>
+
+                  {/* Yerel YOLO / Ubuntu Servis Butonu */}
+                  {onOpenYoloModal && (
+                    <button
+                      type="button"
+                      onClick={onOpenYoloModal}
+                      className="px-2.5 py-1.5 rounded-xl border border-indigo-200 bg-indigo-50/80 hover:bg-indigo-100 text-indigo-900 text-xs font-bold flex items-center gap-1.5 transition-all shadow-2xs active:scale-95 cursor-pointer"
+                      title="Ubuntu üzerinde çalışan Yerel YOLOv8/v11 soru tespit servisi ve filigran ayarları"
+                    >
+                      <Cpu className="w-3.5 h-3.5 text-indigo-600" />
+                      <span>Yerel YOLO (Ubuntu)</span>
+                    </button>
+                  )}
+
                   {/* Kalan Sayfaları Çöz Button */}
                   <button
                     onClick={async () => {
@@ -1113,20 +1195,6 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
                     <span className="text-xs font-bold text-slate-900">
                       Kitapçık Sayfası Fotoğrafı ({activeArchive.sayfaFotolari?.length || 0} Sayfa)
                     </span>
-                    <button
-                      type="button"
-                      onClick={handleCropAllQuestions}
-                      disabled={isCropping}
-                      className="ml-2 px-3 py-1 rounded-xl bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white font-bold text-xs shadow-xs transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-                      title="Fotoğraflardaki her bir soruyu tek tek kırp ve görsellerini hazırla"
-                    >
-                      {isCropping ? (
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      ) : (
-                        <Scissors className="w-3.5 h-3.5 text-indigo-200" />
-                      )}
-                      <span>Soru Soru Ayrıştır</span>
-                    </button>
                   </div>
 
                   {/* Zoom controls */}
@@ -1293,9 +1361,25 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
                       {displayedQuestions.length} Soru {selectedPageFilter !== 'all' ? `(Sayfa ${selectedPageFilter})` : ''}
                     </span>
                   </div>
-                  <span className="text-[11px] text-slate-400">
-                    💡 Soruya tıklayarak ait olduğu sayfa fotoğrafına odaklanabilirsiniz
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleCropAllQuestions}
+                      disabled={isCropping}
+                      className="px-2.5 py-1 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-[11px] font-bold flex items-center gap-1.5 shadow-xs transition-all active:scale-95 disabled:opacity-50 cursor-pointer"
+                      title="Sayfa fotoğraflarındaki soruları tek tek kırpıp ayrıştırır"
+                    >
+                      {isCropping ? (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                      ) : (
+                        <Scissors className="w-3 h-3" />
+                      )}
+                      <span>{isCropping ? 'Ayrıştırılıyor...' : '✂️ Soruları Tek Tek Ayır (Kırp)'}</span>
+                    </button>
+                    <span className="text-[11px] text-slate-400 hidden sm:inline">
+                      💡 Soruya tıklayarak sayfadaki yerine odaklanabilirsiniz
+                    </span>
+                  </div>
                 </div>
 
                 <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
@@ -1344,6 +1428,14 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
                               <Camera className="w-2.5 h-2.5 text-indigo-600" />
                               <span>Sayfa {questionPage}</span>
                             </span>
+
+                            {/* Cropped Image Available Badge */}
+                            {q.soruFotografYolu && (
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-violet-100 text-violet-800 border border-violet-200 flex items-center gap-1" title="Soru fotoğrafı kırpılmış ve hazır">
+                                <Scissors className="w-2.5 h-2.5 text-violet-600" />
+                                <span>Ayrıştırıldı</span>
+                              </span>
+                            )}
 
                             {/* Question Type Badge */}
                             {q.soruTuru && q.soruTuru !== 'coktan_secmeli' && (

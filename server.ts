@@ -2,7 +2,7 @@ import express from "express";
 import path from "path";
 import fs from "fs";
 import { createServer as createViteServer } from "vite";
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 import * as pdfParseModule from "pdf-parse";
 const pdfParse: any = (pdfParseModule as any).default || pdfParseModule;
@@ -48,6 +48,41 @@ let memSchedules: any[] = [];
 let memBooks: any[] = [];
 let memAssignedResources: any[] = [];
 let memCoachPin: string = "998877";
+
+// Local YOLO & Ubuntu Service Config
+let memYoloConfig = {
+  enabled: false,
+  serviceUrl: "http://localhost:8000",
+  confThreshold: 0.5,
+  margin: 10,
+  minSize: 50,
+  autoDewarp: true,
+  lastOnlineCheck: null as string | null,
+  lastOnlineStatus: false,
+  lastModelName: null as string | null,
+};
+
+const YOLO_CONFIG_FILE = path.join(process.cwd(), "data", "yolo_config.json");
+try {
+  if (fs.existsSync(YOLO_CONFIG_FILE)) {
+    const raw = fs.readFileSync(YOLO_CONFIG_FILE, "utf-8");
+    memYoloConfig = { ...memYoloConfig, ...JSON.parse(raw) };
+  }
+} catch (e) {
+  console.warn("YOLO config okunamadı:", e);
+}
+
+function saveYoloConfigToDisk() {
+  try {
+    const dataDir = path.join(process.cwd(), "data");
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
+    }
+    fs.writeFileSync(YOLO_CONFIG_FILE, JSON.stringify(memYoloConfig, null, 2), "utf-8");
+  } catch (e) {
+    console.warn("YOLO config diske yazılamadı:", e);
+  }
+}
 
 const INITIAL_STUDENTS: any[] = [];
 
@@ -1973,13 +2008,14 @@ function addSystemLog(entry: Omit<SystemLogEntry, 'id' | 'timestamp'>) {
 
 // Multi-Tier Model Cascade for High Availability & Ultra-Fast Quota Failover
 const FLASH_VISION_CASCADE = [
+  "gemini-3.1-pro-preview",
+  "gemini-3.1-flash-image",
+  "gemini-3.8-flash",
+  "gemini-3.5-flash",
   "gemini-3.6-flash",
   "gemini-3.7-flash",
-  "gemini-3.5-flash",
-  "gemini-3.1-flash-image",
   "gemini-3.1-flash-lite",
   "gemini-flash-latest",
-  "gemini-3.1-pro-preview",
 ];
 
 const FLASH_TEXT_CASCADE = [
@@ -2640,6 +2676,7 @@ async function executeVisionWithFallback(
     mimeType: string;
     cleanBase64: string;
     temperature?: number;
+    responseSchema?: any;
   }
 ): Promise<{ text: string; usedModel: string }> {
   let lastError: any = null;
@@ -2681,6 +2718,7 @@ async function executeVisionWithFallback(
               ],
               config: {
                 responseMimeType: "application/json",
+                ...(params.responseSchema ? { responseSchema: params.responseSchema } : {}),
                 temperature: params.temperature ?? 0.1,
                 maxOutputTokens: 8192,
               },
@@ -3517,8 +3555,48 @@ function normalizeAndValidateQuestion(
 
   let kutu: [number, number, number, number] | undefined = undefined;
   if (Array.isArray(q.kutu) && q.kutu.length === 4) {
-    const [ymin, xmin, ymax, xmax] = q.kutu.map((n: any) => Number(n) || 0);
-    kutu = [ymin, xmin, ymax, xmax];
+    let [ymin, xmin, ymax, xmax] = q.kutu.map((n: any) => Math.max(0, Math.min(1000, Number(n) || 0)));
+
+    // Determine scale (0-1000 or 0-100)
+    const maxVal = Math.max(ymin, xmin, ymax, xmax);
+    const scale = maxVal > 100 ? 1000 : (maxVal <= 1.0 ? 1.0 : 100);
+
+    let normYmin = ymin / scale;
+    let normXmin = xmin / scale;
+    let normYmax = ymax / scale;
+    let normXmax = xmax / scale;
+
+    // RULE 1: Left Margin Snap (Soru Numarası Garantisi)
+    // If question starts on left side (< 35%), SNAP normXmin to 0 (0%) so left margin numbers (8., 3., 7.) ARE 100% INCLUDED!
+    if (normXmin < 0.35) {
+      normXmin = 0;
+    } else {
+      normXmin = Math.max(0, normXmin - 0.03);
+    }
+
+    // RULE 2: Top Margin Snap
+    if (normYmin < 0.15) {
+      normYmin = 0;
+    } else {
+      normYmin = Math.max(0, normYmin - 0.02);
+    }
+
+    // RULE 3: Right Edge Snap
+    if (normXmax > 0.65) {
+      normXmax = 1.0;
+    } else {
+      normXmax = Math.min(1.0, normXmax + 0.025);
+    }
+
+    // RULE 4: Option Bottom Bound (E Şıkkı Kapsama, Sonraki Soruya Taşmama)
+    normYmax = Math.min(1.0, normYmax + 0.025);
+
+    kutu = [
+      Math.round(normYmin * scale),
+      Math.round(normXmin * scale),
+      Math.round(normYmax * scale),
+      Math.round(normXmax * scale)
+    ];
   }
 
   return {
@@ -3698,6 +3776,172 @@ Yanıt formatı SADECE geçerli bir JSON dizisi olmalıdır:
 });
 
 // =========================================================================
+// 2.0.0 YEREL YOLO & UBUNTU SERVİS ENTEGRASYONU (v8/v11 NANO & FASTAPI)
+// =========================================================================
+app.get("/api/yolo-service/config", async (req, res) => {
+  return res.json({
+    config: memYoloConfig,
+    onlineStatus: memYoloConfig.lastOnlineStatus,
+    lastCheck: memYoloConfig.lastOnlineCheck,
+  });
+});
+
+app.post("/api/yolo-service/config", async (req, res) => {
+  try {
+    const update = req.body || {};
+    memYoloConfig = {
+      ...memYoloConfig,
+      ...update,
+    };
+    saveYoloConfigToDisk();
+    return res.json({ success: true, config: memYoloConfig });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/yolo-service/test-connection", async (req, res) => {
+  try {
+    const targetUrl = (req.body.serviceUrl || memYoloConfig.serviceUrl || "http://localhost:8000").replace(/\/$/, "");
+    const startTime = Date.now();
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3500);
+
+    let healthData: any = null;
+    let isOk = false;
+
+    try {
+      const resp = await fetch(`${targetUrl}/health`, {
+        method: "GET",
+        signal: controller.signal,
+      });
+      if (resp.ok) {
+        healthData = await resp.json().catch(() => ({}));
+        isOk = true;
+      }
+    } catch {
+      try {
+        const rootResp = await fetch(`${targetUrl}/`, {
+          method: "GET",
+          signal: controller.signal,
+        });
+        if (rootResp.ok) {
+          healthData = await rootResp.json().catch(() => ({}));
+          isOk = true;
+        }
+      } catch {}
+    } finally {
+      clearTimeout(timeoutId);
+    }
+
+    const latency_ms = Date.now() - startTime;
+    if (isOk) {
+      memYoloConfig.lastOnlineCheck = new Date().toISOString();
+      memYoloConfig.lastOnlineStatus = true;
+      memYoloConfig.lastModelName = healthData?.model_name || healthData?.model || "best_question_detector.pt";
+      saveYoloConfigToDisk();
+      return res.json({
+        success: true,
+        status: "online",
+        latency_ms,
+        health: healthData,
+      });
+    }
+
+    memYoloConfig.lastOnlineCheck = new Date().toISOString();
+    memYoloConfig.lastOnlineStatus = false;
+    saveYoloConfigToDisk();
+    return res.json({
+      success: false,
+      status: "offline",
+      error: "Servis yanıt vermedi veya zaman aşımı.",
+    });
+  } catch (e: any) {
+    memYoloConfig.lastOnlineCheck = new Date().toISOString();
+    memYoloConfig.lastOnlineStatus = false;
+    saveYoloConfigToDisk();
+    return res.json({
+      success: false,
+      status: "offline",
+      error: e.message || "Bağlantı hatası",
+    });
+  }
+});
+
+app.get("/api/yolo-service/download-package", async (req, res) => {
+  try {
+    const JSZip = (await import("jszip")).default;
+    const zip = new JSZip();
+    const serviceDir = path.join(process.cwd(), "ubuntu_yolo_service");
+
+    function addDirToZip(currentDir: string, zipFolder: any) {
+      const items = fs.readdirSync(currentDir);
+      for (const item of items) {
+        const fullPath = path.join(currentDir, item);
+        const stat = fs.statSync(fullPath);
+        if (stat.isDirectory()) {
+          const subFolder = zipFolder.folder(item);
+          addDirToZip(fullPath, subFolder);
+        } else {
+          const content = fs.readFileSync(fullPath);
+          zipFolder.file(item, content);
+        }
+      }
+    }
+
+    if (fs.existsSync(serviceDir)) {
+      addDirToZip(serviceDir, zip);
+    }
+
+    const zipBuffer = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader("Content-Disposition", 'attachment; filename="deneme_yolo_ubuntu_paketi.zip"');
+    return res.send(zipBuffer);
+  } catch (err: any) {
+    console.error("YOLO zip indirme hatası:", err);
+    return res.status(500).json({ error: "Paket oluşturulamadı: " + err.message });
+  }
+});
+
+app.post("/api/yolo-service/detect-preview", async (req, res) => {
+  try {
+    const { imageBase64, serviceUrl, confThreshold, margin, minSize } = req.body;
+    if (!imageBase64) {
+      return res.status(400).json({ error: "Görsel verisi zorunludur." });
+    }
+    const targetUrl = (serviceUrl || memYoloConfig.serviceUrl || "http://localhost:8000").replace(/\/$/, "");
+    const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, "");
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
+
+    const resp = await fetch(`${targetUrl}/api/detect-questions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        imageBase64: cleanBase64,
+        confThreshold: confThreshold ?? memYoloConfig.confThreshold,
+        margin: margin ?? memYoloConfig.margin,
+        minSize: minSize ?? memYoloConfig.minSize,
+        returnPreview: true,
+      }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
+    if (!resp.ok) {
+      const errText = await resp.text().catch(() => "");
+      return res.status(resp.status).json({ success: false, error: errText || "Servis hatası" });
+    }
+
+    const data = await resp.json();
+    return res.json(data);
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message || "Bağlantı hatası" });
+  }
+});
+
+// =========================================================================
 // 2.0.1 HASSAS TEKİL SORU SINIR / BOUNDING BOX TESPİTİ (GEMINI VISION)
 // =========================================================================
 app.post("/api/ai/detect-question-boxes", async (req, res) => {
@@ -3707,8 +3951,75 @@ app.post("/api/ai/detect-question-boxes", async (req, res) => {
       return res.status(400).json({ error: "Görsel verisi (imageBase64) zorunludur." });
     }
 
-    const ai = getGeminiClient();
     const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, "");
+
+    // =========================================================================
+    // ÖNCELİKLİ YEREL YOLO (UBUNTU) KONTROLÜ
+    // =========================================================================
+    if (memYoloConfig.enabled && memYoloConfig.serviceUrl) {
+      try {
+        console.log(`[YOLO Service] Yerel servis sorgulanıyor: ${memYoloConfig.serviceUrl}/api/detect-questions`);
+        const yoloController = new AbortController();
+        const timeoutId = setTimeout(() => yoloController.abort(), 12000);
+        const targetEndpoint = `${memYoloConfig.serviceUrl.replace(/\/$/, "")}/api/detect-questions`;
+        
+        const yoloResp = await fetch(targetEndpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            imageBase64: cleanBase64,
+            confThreshold: memYoloConfig.confThreshold,
+            margin: memYoloConfig.margin,
+            minSize: memYoloConfig.minSize,
+          }),
+          signal: yoloController.signal,
+        });
+        clearTimeout(timeoutId);
+
+        if (yoloResp.ok) {
+          const yoloData: any = await yoloResp.json();
+          if (yoloData.success && Array.isArray(yoloData.questions) && yoloData.questions.length > 0) {
+            console.log(`[YOLO Service] Başarılı! ${yoloData.questions.length} soru tespit edildi (${yoloData.model || 'best_question_detector.pt'}).`);
+            const boxes = yoloData.questions.map((item: any, idx: number) => {
+              const normBox: [number, number, number, number] = item.normalized_box || [0, 0, 1000, 1000];
+              const corners = [
+                { x: normBox[1], y: normBox[0] },
+                { x: normBox[3], y: normBox[0] },
+                { x: normBox[3], y: normBox[2] },
+                { x: normBox[1], y: normBox[2] },
+              ];
+              return {
+                id: `q-yolo-${item.soru_no || idx + 1}-${Date.now()}`,
+                soruNo: item.soru_no || (idx + 1),
+                soruTipi: "Çoktan Seçmeli",
+                kutu: normBox,
+                corners,
+                guvenSkoru: item.confidence || 0.9,
+                metinOzeti: `Soru ${item.soru_no || idx + 1} (Yerel YOLO)`,
+                cropCoordinates: {
+                  ymin: normBox[0],
+                  xmin: normBox[1],
+                  ymax: normBox[2],
+                  xmax: normBox[3],
+                }
+              };
+            });
+
+            return res.json({
+              success: true,
+              boxes,
+              source: "local-yolo",
+              model: yoloData.model || "best_question_detector.pt",
+              processTimeMs: yoloData.process_time_ms,
+            });
+          }
+        }
+      } catch (yoloErr: any) {
+        console.warn(`[YOLO Service] Yerel servise bağlanılamadı (${yoloErr.message}), Gemini Vision yedeğine geçiliyor...`);
+      }
+    }
+
+    const ai = getGeminiClient();
 
     if (!ai) {
       return res.json({
@@ -3722,55 +4033,52 @@ app.post("/api/ai/detect-question-boxes", async (req, res) => {
       ? `Bu sayfada aranan veya tespit edilmiş soru numaraları: ${targetQuestions.map((t: any) => t.soruNo).filter(Boolean).join(", ")}.`
       : "";
 
+    const TestSayfasiSchema = {
+      type: Type.OBJECT,
+      properties: {
+        sorular: {
+          type: Type.ARRAY,
+          description: "Sayfadaki her bir bağımsız sorunun bilgileri ve koordinatları",
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              soru_no: {
+                type: Type.STRING,
+                description: "Soru numarası veya etiketi (örn: '1', '2', '8'). Soru numarası yoksa sırayla '1', '2'..."
+              },
+              soru_tipi: {
+                type: Type.STRING,
+                description: "Soru tipi: 'Çoktan Seçmeli', 'Boşluk Doldurma', veya 'Açık Uçlu'"
+              },
+              guven_skoru: {
+                type: Type.NUMBER,
+                description: "Tespit güven skoru (0.0 - 1.0 arası, örn: 0.95)"
+              },
+              metin_ozeti: {
+                type: Type.STRING,
+                description: "Sorunun ilk birkaç kelimelik kısa özeti"
+              },
+              koordinatlar: {
+                type: Type.ARRAY,
+                description: "Soruyu tam içine alan [ymin, xmin, ymax, xmax] formatında 0 ile 1000 arasında normalize edilmiş koordinat listesi",
+                items: { type: Type.INTEGER }
+              }
+            },
+            required: ["soru_no", "soru_tipi", "koordinatlar"]
+          }
+        }
+      },
+      required: ["sorular"]
+    };
+
     const prompt = `
-GÖREV:
-Sana verilen test / kitap sayfası görselindeki GERÇEK BASILI HER BİR SORUNUN kesin ve kusursuz sınırlarını (Bounding Box) tespit et.
+Görseldeki test sayfasını analiz et. Sayfada eğiklik, bükülme veya yaylanma olsa dahi her bir bağımsız soruyu (soru kökü, soru numarası, öncüller ve şıklar/boşluklar dahil) kusursuzca tespit et.
 ${questionHint}
 
-ÇOK ÖNEMLİ VE HASSAS KESİN SINIR KURALLARI:
-1. ANKOR METİNLERLE SINIRLAMA (Grounding):
-   - Her soru için;
-     * "baslangicMetni": Sorunun ilk kelimeleri (örn: "10. Edebiyat kuramları...")
-     * "bitisMetni": Sorunun EN SON ŞIKKI veya cevabı (örn: "E) Bir estetik metoda...")
-   - Bu sayede sorunun nerede başlayıp nerede bittiği şaşmaz.
-
-2. ÜST SINIR (ymin) - ÖNCEKİ SORUNUN ŞIKLARINI KESİNLİKLE DAHİL ETME:
-   - Sorunun başlangıcı, basılı soru numarasının (örn: "8.", "10.", "11.") veya o soruya ait "ÖSYM KÖŞESİ" başlığının hemen üstüdür.
-   - KESİNLİKLE bir önceki sorunun şıklarını (C, D, E gibi) veya metnini İÇERMEMELİDİR! ymin değerini tam o sorunun başladığı hizaya koy.
-
-3. ALT SINIR (ymax) - ŞIKLARI ASLA YARIDA KESME VE SONRAKİ SORUYA TAŞMA:
-   - Sorunun paragraf metni, soru kökü ("Bu parçaya göre...") ve BÜTÜN SEÇENEKLERİ (A, B, C, D, E) tek bir sorunun ayrılmaz parçasıdır.
-   - ymax değeri, sorunun EN SON şıkkının (genellikle E şıkkının) veya el yazısı çözümünün alt kenarında bitmelidir. Şıkları asla yarıda kesme (örn: A, B'yi alıp C, D, E'yi dışarıda bırakma!).
-   - Aynı zamanda, alttaki SONRAKİ sorunun (örn: 9., 12. soru) başlığına veya metnine KESİNLİKLE TAŞMA!
-
-4. SOL ve SAĞ SINIRLAR (xmin, xmax) - SÜTUN DUVARI / AYRIMI:
-   - Test sayfaları 2 sütunlu (Sol sütun, Sağ sütun) veya 3 sütunludur.
-   - Sol sütundaki soru (örn: Soru 10, 11): xmin sol kenardan başlar, xmax iki sütunun arasındaki orta dikey boşlukta (kolon ayrımında) biter. Sağ sütundaki soruları (örn: Soru 12, 13) KESİNLİKLE İÇİNE ALMAZ!
-   - Sağ sütundaki soru (örn: Soru 12, 13): xmin orta dikey boşluktan başlar, xmax sağ kenarda biter. Sol sütundaki soruları KESİNLİKLE İÇİNE ALMAZ!
-
-5. YARIM VE KESİK SORULARI ÇIKAR:
-   - Kenarlarda yarısı kesilmiş veya tamamı görünmeyen soruları kutulamaya dahil etme.
-
-6. KOORDİNAT STANDARDI:
-   - [ymin, xmin, ymax, xmax] formatında 0-1000 standardında tamsayılar döndür (0: en üst/en sol, 1000: en alt/en sağ).
-
-Yanıt formatı SADECE geçerli bir JSON dizisi olmalıdır:
-[
-  {
-    "soruNo": 10,
-    "sutun": "sol",
-    "baslangicMetni": "10. Edebiyat kuramları...",
-    "bitisMetni": "E) Bir estetik metoda...",
-    "kutu": [35, 25, 420, 485]
-  },
-  {
-    "soruNo": 11,
-    "sutun": "sol",
-    "baslangicMetni": "11. Özgünlük genellikle...",
-    "bitisMetni": "E) ...",
-    "kutu": [440, 25, 960, 485]
-  }
-]
+Koordinat Çıkarma Kuralları (ÖNEMLİ):
+1. **Alt Sınır (ymax) Çok Geniş Tutulmalı:** Kutunun alt sınırı (ymax), sorunun bittiği yerin (özellikle A, B, C, D, E şıklarının ve altındaki son satırların) en az 30-40 piksel aşağısına kadar cömertçe uzatılmalıdır. Şıkların yarım kalmasına veya kesilmesine ASLA izin verme.
+2. **Sol Sınır (xmin) Geniş Tutulmalı:** Sol kenar (xmin), soru numarasının en sol karakterinden en az 25-30 piksel daha soldan başlamalıdır ki soru numaraları ve başlangıç kelimeleri kesilmesin.
+3. Sayfadaki her bir soruyu tam sarmalayan [ymin, xmin, ymax, xmax] formatında 0-1000 arası normalize koordinatları hesapla.
 `;
 
     const { text: rawText } = await executeVisionWithFallback(ai, {
@@ -3778,53 +4086,55 @@ Yanıt formatı SADECE geçerli bir JSON dizisi olmalıdır:
       mimeType,
       cleanBase64,
       temperature: 0.1,
+      responseSchema: TestSayfasiSchema,
     });
 
     let cleanText = rawText.trim();
-    const ilk = cleanText.indexOf("[");
-    const son = cleanText.lastIndexOf("]");
-    if (ilk >= 0 && son > ilk) {
-      cleanText = cleanText.substring(ilk, son + 1);
+    let sorularList: any[] = [];
+    
+    try {
+      const parsedObj = JSON.parse(cleanText);
+      if (parsedObj && Array.isArray(parsedObj.sorular)) {
+        sorularList = parsedObj.sorular;
+      } else if (Array.isArray(parsedObj)) {
+        sorularList = parsedObj;
+      }
+    } catch {
+      sorularList = [];
     }
 
-    let parsed = JSON.parse(cleanText);
-    if (!Array.isArray(parsed)) {
-      parsed = [];
-    }
-
-    const boxes = parsed.map((item: any) => {
+    const boxes = sorularList.map((item: any, idx: number) => {
+      let rawKutu = item.koordinatlar || item.kutu;
       let kutu: [number, number, number, number] | null = null;
-      if (Array.isArray(item.kutu) && item.kutu.length === 4) {
-        let [ymin, xmin, ymax, xmax] = item.kutu.map((n: any) => Math.max(0, Math.min(1000, Number(n) || 0)));
-        
-        // Option Protection: If height is less than 200 (20% of page), expand ymax to ensure choices C, D, E aren't cut
-        const h = ymax - ymin;
-        if (h < 200 && ymax < 920) {
-          ymax = Math.min(970, ymax + Math.max(60, 220 - h));
-        }
-
-        // Column Wall Protection: ensure xmin and xmax don't span full page on multi-column
-        if (item.sutun === "sol" && xmax > 520) {
-          xmax = 490;
-        } else if (item.sutun === "sag" && xmin < 480) {
-          xmin = 505;
-        }
-
+      
+      if (Array.isArray(rawKutu) && rawKutu.length === 4) {
+        let [ymin, xmin, ymax, xmax] = rawKutu.map((n: any) => Math.max(0, Math.min(1000, Number(n) || 0)));
         kutu = [ymin, xmin, ymax, xmax];
       }
+      
+      // Parse numeric soruNo from string or integer
+      let rawNoStr = String(item.soru_no || item.soruNo || "").replace(/\D/g, "");
+      let parsedSoruNo = parseInt(rawNoStr, 10) || (idx + 1);
+
+      // Generate 4-corner representation for SVG Overlay
+      let corners = kutu ? [
+        { x: kutu[1], y: kutu[0] }, // top-left
+        { x: kutu[3], y: kutu[0] }, // top-right
+        { x: kutu[3], y: kutu[2] }, // bottom-right
+        { x: kutu[1], y: kutu[2] }  // bottom-left
+      ] : [];
+
       return {
-        soruNo: Number(item.soruNo) || 0,
-        sutun: item.sutun || "sol",
+        id: `q-${idx + 1}-${Date.now()}`,
+        soruNo: parsedSoruNo,
+        soru_no_str: item.soru_no || item.soruNo || `Soru ${parsedSoruNo}`,
+        soru_tipi: item.soru_tipi || item.soruTuru || "Çoktan Seçmeli",
+        confidence: Number(item.guven_skoru) || 0.95,
+        textSummary: item.metin_ozeti || item.textSummary || `Soru ${parsedSoruNo}`,
         kutu,
+        corners
       };
-    }).filter((b: any) => {
-      if (b.soruNo <= 0 || !b.kutu) return false;
-      const [ymin, xmin, ymax, xmax] = b.kutu;
-      // Filter out tiny ghost fragments
-      const h = ymax - ymin;
-      const w = xmax - xmin;
-      return h >= 50 && w >= 80;
-    });
+    }).filter((b: any) => b.kutu !== null);
 
     res.json({
       success: true,
@@ -4286,16 +4596,15 @@ KRİTİK KURALLAR:
 15. Analiz Notu: Duruma dair kısa pedagojik açıklama.
 16. Soru Kırpma Alanı / Bounding Box (kutu):
     - Sorunun sayfadaki tam sınırları: [ymin, xmin, ymax, xmax] (0-1000 standardında koordinatlar).
-    - ÇOK ÖNEMLİ (SÜTUN DİKKATİ): Test kitapları genellikle 2 veya 3 sütunludur.
-    - Eğer soru SOL sütundaysa xmin ve xmax SADECE sol sütunu kapsamalıdır (örn: [60, 35, 480, 485]). Yanındaki sağ sütunu veya diğer soruları KESİNLİKLE dahil etme!
-    - Eğer soru SAĞ sütundaysa xmin ve xmax SADECE sağ sütunu kapsamalıdır (örn: [60, 500, 520, 960]). Soldaki soruları dahil etme!
-    - Soru numarasıyla başlar, soru kökü, şekil/grafik ve şıklar/cevap alanı bitene kadar olan alanı hassasça çevreler.
+    - ÜST SINIR (ymin): Soru numarasının başladığı üst kenar.
+    - ALT SINIR (ymax): Sorunun EN SON şıkkının (E şıkkı) bittiği alt kenar (şıkları asla yarıda kesme, E şıkkını eksiksiz dahil et!).
+    - YATAY SINIRLAR (xmin, xmax): Sorunun sol marjininden başlar, metnin ve şıkların bittiği sağ kenara kadar uzanır. Sorunun sağ tarafındaki metinleri kesinlikle yarıda kesme (geniş sorular için xmax 800-880 olabilir).
 
 Yanıt formatı SADECE geçerli bir JSON dizisi olmalıdır:
 [
   {
     "soruNo": 1,
-    "kutu": [55, 30, 480, 480],
+    "kutu": [25, 20, 980, 820],
     "soruTuru": "coktan_secmeli",
     "ders": "Matematik (TYT)",
     "unite": "Fonksiyonlar",

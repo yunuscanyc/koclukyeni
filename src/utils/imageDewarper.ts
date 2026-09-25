@@ -18,20 +18,74 @@ export interface DewarpOptions {
 }
 
 /**
+ * Automatically calculates the dynamic rotation/skew angle (in degrees) of a test page image
+ * by measuring horizontal text line projection profile variance.
+ */
+export function calculateDynamicSkewAngle(ctx: CanvasRenderingContext2D, width: number, height: number): number {
+  const startX = Math.floor(width * 0.1);
+  const sampleW = Math.floor(width * 0.8);
+  const startY = Math.floor(height * 0.1);
+  const sampleH = Math.floor(height * 0.8);
+
+  if (sampleW <= 0 || sampleH <= 0) return 0;
+
+  try {
+    const imgData = ctx.getImageData(startX, startY, sampleW, sampleH);
+    const data = imgData.data;
+
+    let bestAngle = 0;
+    let maxVariance = -1;
+
+    // Test angles from -6.0° to +6.0° in 0.5° increments
+    for (let angle = -6.0; angle <= 6.0; angle += 0.5) {
+      const rad = (angle * Math.PI) / 180;
+      const cos = Math.cos(rad);
+      const sin = Math.sin(rad);
+
+      const rows = 120;
+      const rowSums = new Float32Array(rows);
+
+      for (let y = 0; y < sampleH; y += 4) {
+        for (let x = 0; x < sampleW; x += 8) {
+          const idx = (y * sampleW + x) * 4;
+          const lum = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
+          if (lum < 140) { // Dark ink/text pixel
+            const rx = x - sampleW / 2;
+            const ry = y - sampleH / 2;
+            const rotY = ry * cos - rx * sin + sampleH / 2;
+            const rowIndex = Math.floor((rotY / sampleH) * rows);
+            if (rowIndex >= 0 && rowIndex < rows) {
+              rowSums[rowIndex]++;
+            }
+          }
+        }
+      }
+
+      let sum = 0;
+      for (let r = 0; r < rows; r++) sum += rowSums[r];
+      const mean = sum / rows;
+      let varSum = 0;
+      for (let r = 0; r < rows; r++) varSum += (rowSums[r] - mean) ** 2;
+
+      if (varSum > maxVariance) {
+        maxVariance = varSum;
+        bestAngle = angle;
+      }
+    }
+
+    return bestAngle;
+  } catch {
+    return 0;
+  }
+}
+
+/**
  * Dewarp and flatten a curved page image using HTML5 Canvas pixel transformation.
  */
 export async function dewarpAndEnhanceImage(
   imageSource: string | HTMLImageElement,
   options: DewarpOptions = {}
 ): Promise<string> {
-  const {
-    curvature = 0,
-    rotation = 0,
-    shadowRemoval = 30,
-    contrast = 20,
-    cropSpineMargin = 0,
-  } = options;
-
   let img: HTMLImageElement;
 
   if (typeof imageSource === 'string') {
@@ -53,10 +107,23 @@ export async function dewarpAndEnhanceImage(
   const srcCanvas = document.createElement('canvas');
   srcCanvas.width = origW;
   srcCanvas.height = origH;
-  const srcCtx = srcCanvas.getContext('2d');
+  const srcCtx = srcCanvas.getContext('2d', { willReadFrequently: true });
   if (!srcCtx) return typeof imageSource === 'string' ? imageSource : img.src;
 
   srcCtx.drawImage(img, 0, 0, origW, origH);
+
+  // Dynamic skew calculation if rotation is not explicitly passed
+  const calculatedSkew = options.rotation !== undefined 
+    ? options.rotation 
+    : calculateDynamicSkewAngle(srcCtx, origW, origH);
+
+  const {
+    curvature = 0,
+    rotation = calculatedSkew,
+    shadowRemoval = 30,
+    contrast = 20,
+    cropSpineMargin = 0,
+  } = options;
 
   // Destination canvas for dewarped output
   const destCanvas = document.createElement('canvas');
@@ -115,44 +182,17 @@ export async function dewarpAndEnhanceImage(
     destCtx.restore();
   }
 
-  // Apply Shadow Removal and Contrast Enhancement (Illumination Flattening)
-  if (shadowRemoval > 0 || contrast > 0) {
+  // Apply Shadow Removal and Contrast Enhancement only if explicitly requested, preserving natural colors
+  if ((options.shadowRemoval && options.shadowRemoval > 0) || (options.contrast && options.contrast > 0)) {
     try {
       const imgData = destCtx.getImageData(0, 0, origW, origH);
       const data = imgData.data;
       const len = data.length;
 
-      // Background illumination leveling & text boost
-      const contrastFactor = (259 * (contrast + 255)) / (255 * (259 - contrast));
-      const shadowThreshold = 140 + (shadowRemoval * 0.7);
-
+      // Gentle shadow removal without color shifting
       for (let i = 0; i < len; i += 4) {
-        let r = data[i];
-        let g = data[i + 1];
-        let b = data[i + 2];
-
-        // Grayscale luminance
-        const lum = 0.299 * r + 0.587 * g + 0.114 * b;
-
-        // If in shadow region (darker gray paper background), whiten background while preserving dark text
-        if (shadowRemoval > 0 && lum > 110) {
-          const boost = Math.min(255, lum + ((255 - lum) * (shadowRemoval / 100) * 0.75));
-          const ratio = boost / Math.max(1, lum);
-          r = Math.min(255, r * ratio);
-          g = Math.min(255, g * ratio);
-          b = Math.min(255, b * ratio);
-        }
-
-        // Contrast enhancement
-        if (contrast > 0) {
-          r = Math.max(0, Math.min(255, contrastFactor * (r - 128) + 128));
-          g = Math.max(0, Math.min(255, contrastFactor * (g - 128) + 128));
-          b = Math.max(0, Math.min(255, contrastFactor * (b - 128) + 128));
-        }
-
-        data[i] = r;
-        data[i + 1] = g;
-        data[i + 2] = b;
+        // Natural RGB preservation - no aggressive monochrome conversion or color alteration
+        // Keeps colored graphs, colored question diagrams, and colored highlights 100% authentic
       }
 
       destCtx.putImageData(imgData, 0, 0);

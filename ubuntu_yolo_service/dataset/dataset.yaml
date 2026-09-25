@@ -1,0 +1,9 @@
+# YOLOv8 / YOLOv11 Soru Tespiti Veri Seti Yapılandırması
+# Eğitim ve doğrulama klasörlerinin yolları (train.py ile aynı dizinde veya mutlak yol)
+path: ./dataset
+train: train/images
+val: val/images
+
+# Sınıflar (Yalnızca tam ve eksiksiz sorular tespit edilecektir)
+names:
+  0: question

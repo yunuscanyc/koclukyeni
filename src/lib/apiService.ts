@@ -355,6 +355,38 @@ export async function detectQuestionBoxes(
   }
 }
 
+// 13. LOCAL YOLO & UBUNTU SERVICE INTEGRATION
+export async function getYoloConfig(): Promise<any> {
+  return fetchApi<any>('/api/yolo-service/config');
+}
+
+export async function saveYoloConfig(config: any): Promise<any> {
+  return fetchApi<any>('/api/yolo-service/config', {
+    method: 'POST',
+    body: JSON.stringify(config),
+  });
+}
+
+export async function testYoloConnection(serviceUrl?: string): Promise<{
+  success: boolean;
+  status: string;
+  latency_ms?: number;
+  health?: any;
+  error?: string;
+}> {
+  return fetchApi<any>('/api/yolo-service/test-connection', {
+    method: 'POST',
+    body: JSON.stringify({ serviceUrl }),
+  });
+}
+
+export async function testYoloDetection(imageBase64: string, options?: any): Promise<any> {
+  return fetchApi<any>('/api/yolo-service/detect-preview', {
+    method: 'POST',
+    body: JSON.stringify({ imageBase64, ...options }),
+  });
+}
+
 // No-op placeholder, as Express backend handles initialization and seeding automatically on server startup
 export async function seedDatabaseIfEmpty(): Promise<void> {
   return Promise.resolve();

@@ -161,6 +161,7 @@ export interface OgrenciSinavKaydi {
   ogrenciNotu?: string; // Öğrencinin testle ilgili koça yazdığı not
   kocGeriBildirimi?: string; // Koçun bu teste özel geri bildirimi
   isDeneme?: boolean; // Bu sınav bir denemedir işaretlendiyse true
+  forceReset?: boolean; // Soruları sıfırlama bayrağı (mevcut soruları ezmek için)
 }
 
 export interface SystemLogEntry {
@@ -344,4 +345,40 @@ export interface StudentAssignedResource {
   assignedDate: string;        // Atanma Tarihi (ISO YYYY-MM-DD)
   completed: boolean;          // Öğrenci bitirdi mi?
   completedDate?: string;      // Tamamlanma tarihi
+}
+
+export interface YoloServiceConfig {
+  enabled: boolean;
+  serviceUrl: string;
+  confThreshold: number;
+  margin: number;
+  minSize: number;
+  autoDewarp: boolean;
+  lastOnlineCheck?: string;
+  lastOnlineStatus?: boolean;
+  lastModelName?: string;
+}
+
+export interface YoloDetectedQuestion {
+  soru_no: number;
+  normalized_box: [number, number, number, number]; // [ymin, xmin, ymax, xmax] 0-1000
+  pixel_coords?: {
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+    width: number;
+    height: number;
+  };
+  confidence: number;
+}
+
+export interface YoloDetectResponse {
+  success: boolean;
+  process_time_ms?: number;
+  total_questions?: number;
+  questions?: YoloDetectedQuestion[];
+  preview_image?: string;
+  model?: string;
+  error?: string;
 }

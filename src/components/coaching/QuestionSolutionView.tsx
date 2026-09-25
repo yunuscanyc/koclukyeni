@@ -18,7 +18,6 @@ import {
   Scissors
 } from 'lucide-react';
 import { MathRenderer, parseStructuredSolution } from '../common/MathRenderer';
-import { ManualQuestionCropModal } from './ManualQuestionCropModal';
 
 interface QuestionSolutionViewProps {
   cozumDetayi?: string;
@@ -66,6 +65,7 @@ export const QuestionSolutionView: React.FC<QuestionSolutionViewProps> = ({
   const [isExpanded, setIsExpanded] = useState(defaultExpanded);
   const [showCroppedModal, setShowCroppedModal] = useState(false);
   const [showManualCropModal, setShowManualCropModal] = useState(false);
+  const [showInlineImage, setShowInlineImage] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState(cozumDetayi);
   const [viewMode, setViewMode] = useState<'cards' | 'board'>('cards');
@@ -146,18 +146,6 @@ export const QuestionSolutionView: React.FC<QuestionSolutionViewProps> = ({
             <span>{hasSolution ? 'Şekilli Çözüm & Matematik Adımları' : 'Çözüm Ekle / Görüntüle'}</span>
             {isExpanded ? <ChevronUp className="w-3.5 h-3.5 text-amber-700" /> : <ChevronDown className="w-3.5 h-3.5 text-amber-700" />}
           </button>
-
-          {soruFotografYolu && (
-            <button
-              type="button"
-              onClick={() => setShowCroppedModal(true)}
-              className="flex items-center gap-1.5 font-bold px-3 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 active:scale-95 text-indigo-900 border border-indigo-200/80 transition-all text-xs cursor-pointer shadow-xs"
-              title="Ayrıştırılan tekil soru görselini büyüt"
-            >
-              <Camera className="w-3.5 h-3.5 text-indigo-600" />
-              <span>📷 Soru Görselini Göster</span>
-            </button>
-          )}
         </div>
 
         {/* Badges for Subject & Correctness */}
@@ -293,50 +281,30 @@ export const QuestionSolutionView: React.FC<QuestionSolutionViewProps> = ({
 
           {/* Cropped Question Photo Preview Card */}
           {soruFotografYolu && (
-            <div className="p-3 rounded-2xl bg-slate-950/90 border border-indigo-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-inner">
-              <div className="flex items-center gap-3">
-                <div 
-                  className="w-16 h-16 rounded-xl bg-slate-900 overflow-hidden border border-indigo-500/40 shrink-0 cursor-pointer group relative"
+            <div className="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <img
+                  src={soruFotografYolu.startsWith('data:') ? soruFotografYolu : `data:image/jpeg;base64,${soruFotografYolu}`}
+                  alt={`Soru ${soruNo || ''}`}
+                  className="w-12 h-12 object-contain bg-white rounded-lg border border-slate-700 shrink-0 cursor-pointer hover:opacity-90"
                   onClick={() => setShowCroppedModal(true)}
-                >
-                  <img
-                    src={soruFotografYolu.startsWith('data:') ? soruFotografYolu : `data:image/jpeg;base64,${soruFotografYolu}`}
-                    alt="Kırpılmış Soru"
-                    className="w-full h-full object-cover transition-transform group-hover:scale-105"
-                  />
-                  <div className="absolute inset-0 bg-slate-950/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
-                    <Maximize2 className="w-4 h-4 text-white" />
-                  </div>
-                </div>
-                <div>
-                  <p className="text-xs font-bold text-white flex items-center gap-1.5">
-                    <Scissors className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Ayrıştırılmış Tekil Soru Görseli</span>
-                  </p>
-                  <p className="text-[10px] text-slate-400 mt-0.5">Test sayfasından otomatik olarak kesilip ayrıştırılmıştır.</p>
+                />
+                <div className="min-w-0">
+                  <span className="text-[11px] font-bold text-slate-200 block truncate">
+                    ✂️ Ayrıştırılmış Soru Görseli
+                  </span>
+                  <span className="text-[10px] text-slate-400">
+                    Büyütmek için tıklayın
+                  </span>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowCroppedModal(true)}
-                  className="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer self-start sm:self-auto shadow-sm"
-                >
-                  <Maximize2 className="w-3.5 h-3.5" />
-                  <span>Görseli Büyüt</span>
-                </button>
-                {pagePhoto && onSaveCrop && (
-                  <button
-                    type="button"
-                    onClick={() => setShowManualCropModal(true)}
-                    className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-amber-300 border border-amber-500/30 text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors"
-                    title="Kırpma alanını sayfada elle ayarla"
-                  >
-                    <Scissors className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Alanı Ayarla</span>
-                  </button>
-                )}
-              </div>
+              <button
+                type="button"
+                onClick={() => setShowCroppedModal(true)}
+                className="px-2.5 py-1 rounded-lg bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 border border-indigo-500/40 text-[11px] font-bold shrink-0 transition-colors"
+              >
+                Görseli Aç
+              </button>
             </div>
           )}
 
@@ -532,13 +500,13 @@ export const QuestionSolutionView: React.FC<QuestionSolutionViewProps> = ({
       {/* CROPPED QUESTION FULLSCREEN MODAL */}
       {showCroppedModal && soruFotografYolu && (
         <div className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-3xl w-full max-h-[90vh] overflow-hidden flex flex-col shadow-2xl">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-3xl w-full max-h-[90vh] overflow-hidden flex flex-col shadow-2xl animate-in fade-in zoom-in-95 duration-200">
             {/* Header */}
-            <div className="p-4 border-b border-slate-800 flex items-center justify-between">
+            <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/90">
               <div className="flex items-center gap-2">
-                <Sparkles className="w-5 h-5 text-amber-400" />
+                <Camera className="w-5 h-5 text-indigo-400" />
                 <h3 className="text-sm font-bold text-white">
-                  {soruNo ? `Soru ${soruNo}` : 'Ayrıştırılmış Soru'} - Orijinal Görsel
+                  {soruNo ? `Soru ${soruNo}` : 'Ayrıştırılmış Soru'} - Soru Görseli
                 </h3>
               </div>
               <button
@@ -551,11 +519,11 @@ export const QuestionSolutionView: React.FC<QuestionSolutionViewProps> = ({
             </div>
 
             {/* Body */}
-            <div className="p-6 overflow-auto flex items-center justify-center bg-slate-950/60 min-h-[300px]">
+            <div className="p-6 overflow-auto flex items-center justify-center bg-slate-950/80 min-h-[300px]">
               <img
                 src={soruFotografYolu.startsWith('data:') ? soruFotografYolu : `data:image/jpeg;base64,${soruFotografYolu}`}
-                alt="Ayrıştırılmış Soru"
-                className="max-w-full max-h-[65vh] object-contain rounded-xl shadow-lg border border-slate-800"
+                alt={soruNo ? `Soru ${soruNo}` : 'Soru Görseli'}
+                className="max-w-full max-h-[68vh] object-contain rounded-xl shadow-lg border border-slate-800 bg-white"
               />
             </div>
 
@@ -565,27 +533,13 @@ export const QuestionSolutionView: React.FC<QuestionSolutionViewProps> = ({
               <button
                 type="button"
                 onClick={() => setShowCroppedModal(false)}
-                className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold cursor-pointer transition-colors"
+                className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold cursor-pointer transition-colors shadow-sm"
               >
                 Kapat
               </button>
             </div>
           </div>
         </div>
-      )}
-
-      {/* MANUAL CROP ADJUSTMENT MODAL */}
-      {showManualCropModal && pagePhoto && onSaveCrop && (
-        <ManualQuestionCropModal
-          isOpen={showManualCropModal}
-          onClose={() => setShowManualCropModal(false)}
-          pagePhoto={pagePhoto}
-          questionNumber={soruNo || 1}
-          initialKutu={kutu}
-          onSaveCrop={(newCroppedBase64, newKutu) => {
-            onSaveCrop(newCroppedBase64, newKutu);
-          }}
-        />
       )}
     </div>
   );

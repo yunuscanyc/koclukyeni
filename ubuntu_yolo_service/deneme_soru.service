@@ -1,0 +1,25 @@
+[Unit]
+Description=Deneme Sınavı Soru Koordinat Tespit & Dewarp Servisi
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/var/www/deneme_app
+ExecStart=/usr/bin/python3 /var/www/deneme_app/app.py
+
+# 4 GB RAM ve CPU koruması için otomatik yeniden başlatma
+Restart=always
+RestartSec=3s
+Environment=PYTHONUNBUFFERED=1
+Environment=PORT=8000
+Environment=HOST=0.0.0.0
+Environment=WATCH_DIR=/var/www/deneme_app/inputs
+
+# Bellek ve CPU kaynak sınırları (Sistemin kilitlenmesini kesin olarak engeller)
+MemoryMax=2.5G
+MemoryHigh=2.0G
+CPUQuota=300%
+
+[Install]
+WantedBy=multi-user.target

@@ -46,7 +46,7 @@ import {
 } from 'lucide-react';
 import { Student, OgrenciSinavKaydi, Kazanim, SoruAnalizDetay, CoachNote, WeeklyScheduleTask, SoruTakipKaydi, DenemeSinavi, StudentAssignedResource, BookDifficulty } from '../../types';
 import { StudentTestUploadModal } from './StudentTestUploadModal';
-import { getExamArchiveById } from '../../lib/apiService';
+import { getExamArchiveById, saveExamArchive } from '../../lib/apiService';
 import { PWAInstallButton } from '../pwa/PWAInstallButton';
 import { QuestionSolutionView } from '../coaching/QuestionSolutionView';
 import { WeeklyScheduleTab } from '../coaching/tabs/WeeklyScheduleTab';
@@ -293,14 +293,63 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
       return;
     }
 
+    // Kullanıcı Talimatı: Soruları tek tek ayır dediğinde daha önceden çözülmüş de olsa tüm soruları silsin!
+    const determinedDers = archive.sorular?.find(q => q.ders && q.ders !== 'Genel')?.ders || (archive.sinavTuru === 'AYT' ? 'Matematik' : 'Temel Matematik');
+
+    const clearedArchive: OgrenciSinavKaydi = {
+      ...archive,
+      sorular: [],
+      toplamSoru: 0,
+      dogruSayisi: 0,
+      yanlisSayisi: 0,
+      bosSayisi: 0,
+      net: 0,
+      aiStatus: 'processing',
+      forceReset: true,
+    };
+
+    setStudentArchiveCache((prev) => ({
+      ...prev,
+      [archive.id]: clearedArchive,
+    }));
+
+    if (selectedArchive?.id === archive.id) {
+      setSelectedArchive(clearedArchive);
+    }
+
+    if (onSaveExamArchive) {
+      onSaveExamArchive(clearedArchive);
+    }
+    try {
+      await saveExamArchive(clearedArchive);
+    } catch (saveErr) {
+      console.warn('Student cleared archive save error:', saveErr);
+    }
+
     setIsStudentCropping(true);
-    showPortalToast('Sorular sayfa fotoğraflarından tek tek ayrıştırılıyor...', 'info');
+    showPortalToast('Daha önce çözülmüş tüm sorular silindi! Sayfalardaki sorular sıfırdan ayrıştırılıyor...', 'info');
 
     try {
-      const croppedSorular = await batchCropArchiveQuestions(validPhotos, archive.sorular || []);
+      const croppedSorular = await batchCropArchiveQuestions(
+        validPhotos,
+        [],
+        (msg) => showPortalToast(msg, 'info'),
+        {
+          resetAllQuestions: true,
+          defaultDers: determinedDers,
+        }
+      );
+
       const updatedArchive: OgrenciSinavKaydi = {
         ...archive,
         sorular: croppedSorular,
+        toplamSoru: croppedSorular.length,
+        dogruSayisi: 0,
+        yanlisSayisi: 0,
+        bosSayisi: croppedSorular.length,
+        net: 0,
+        aiStatus: 'completed',
+        forceReset: true,
       };
 
       setStudentArchiveCache((prev) => ({
@@ -315,8 +364,13 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
       if (onSaveExamArchive) {
         onSaveExamArchive(updatedArchive);
       }
+      try {
+        await saveExamArchive(updatedArchive);
+      } catch (saveErr) {
+        console.warn('Student updated archive save error:', saveErr);
+      }
 
-      showPortalToast(`${croppedSorular.length} adet soru başarıyla ayrıştırıldı!`, 'success');
+      showPortalToast(`Daha önceki tüm sorular silindi ve ${croppedSorular.length} adet yeni soru sıfırdan ayrıştırıldı!`, 'success');
     } catch (err: any) {
       console.warn('Student crop questions error:', err);
       showPortalToast('Soru ayrıştırma sırasında bir hata oluştu.', 'error');
@@ -1027,22 +1081,6 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
                                         <Download className="w-3 h-3 text-indigo-600" />
                                       )}
                                       <span>{isDownloadingStudentZip ? (studentZipProgress || 'İndiriliyor...') : `Fotoğrafları İndir (${studentExamPhotos.length || (arch as any).photosCount || 0} Sayfa .ZIP)`}</span>
-                                    </button>
-
-                                    {/* Soru Soru Ayrıştır button */}
-                                    <button
-                                      type="button"
-                                      onClick={() => handleStudentCropAllQuestions(arch)}
-                                      disabled={isStudentCropping}
-                                      className="px-3 py-1 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white border border-indigo-600 text-[11px] font-bold transition-all flex items-center gap-1.5 shadow-xs disabled:opacity-50 cursor-pointer"
-                                      title="Fotoğraflardaki soruları tek tek ayrıştır ve görsellerini hazırla"
-                                    >
-                                      {isStudentCropping ? (
-                                        <Loader2 className="w-3 h-3 animate-spin text-white" />
-                                      ) : (
-                                        <Scissors className="w-3 h-3 text-indigo-200" />
-                                      )}
-                                      <span>Soru Soru Ayrıştır</span>
                                     </button>
 
                                     {/* Tekrar Çöz (Resimleri Silme) button */}
