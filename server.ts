@@ -1411,15 +1411,12 @@ function formatArchiveRow(row: any, full = false) {
   const isAllPagesCovered = totalPhotos === 0 || (coveredPages.size >= totalPhotos && totalPhotos > 0);
 
   const explicitAiStatus = row.ai_status;
-  const isActivelyProcessing = explicitAiStatus === "processing" || explicitAiStatus === "rate_limited" || explicitAiStatus === "pending";
+  const isJobActiveInQueue = backgroundJobQueue.some((j) => j.archiveId === row.id);
 
-  const isCompleted = !isActivelyProcessing && (
-    explicitAiStatus === "completed" ||
-    (isAllPagesCovered && parsedSorular.length > 0 && totalPhotos > 0)
-  );
-  const isRead = row.durum === 'İncelendi' || row.is_new === false || row.is_new === 'f' || row.is_new === 'false' || row.is_new === 0 || row.is_new === '0';
+  const isCompleted = explicitAiStatus === "completed" || (!isJobActiveInQueue && (isAllPagesCovered || explicitAiStatus !== "processing") && parsedSorular.length > 0);
+  const isActivelyProcessing = isJobActiveInQueue || (!isCompleted && (explicitAiStatus === "processing" || explicitAiStatus === "rate_limited" || explicitAiStatus === "pending"));
 
-  let derivedAiStatus = isActivelyProcessing ? explicitAiStatus : (isCompleted ? "completed" : (explicitAiStatus || "pending"));
+  let derivedAiStatus = isCompleted ? "completed" : (isActivelyProcessing ? (explicitAiStatus || "processing") : "completed");
   let derivedAiStatusMsg = row.ai_status_message || "";
 
   if (isActivelyProcessing) {
@@ -1452,6 +1449,8 @@ function formatArchiveRow(row: any, full = false) {
     // In list view: preserve exact length using lightweight placeholders so UI counts match without transferring megabytes of base64
     photosToSend = Array(totalPhotos).fill("");
   }
+
+  const isRead = parseBool(row.is_read, false) || parseBool(row.isRead, false);
 
   return {
     id: row.id,

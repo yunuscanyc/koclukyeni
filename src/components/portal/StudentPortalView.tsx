@@ -390,23 +390,23 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
 
   const getAIStatusBadge = (archive: OgrenciSinavKaydi) => {
     const photos = archive.sayfaFotolari || archive.fotografYollari || [];
-    const totalPages = photos.length;
+    const totalPages = photos.length || (archive as any).photosCount || (archive as any).sayfaSayisi || 0;
     const realQuestions = (archive.sorular || []).filter(q => q.unite !== "Çözülmemiş / Boş Sayfa" && q.unite !== "Boş / Çözülmemiş Sayfa");
     const coveredPagesSet = new Set((archive.sorular || []).map(q => q.sayfaNo || (q.sayfaIndex !== undefined ? q.sayfaIndex + 1 : 1)).filter(Boolean));
     const attemptedPagesSet = new Set(realQuestions.filter(q => q.isaretlenenSik && q.isaretlenenSik !== "Boş").map(q => q.sayfaNo || (q.sayfaIndex !== undefined ? q.sayfaIndex + 1 : 1)));
     
-    const isAllCovered = totalPages === 0 || (coveredPagesSet.size >= totalPages && totalPages > 0);
-    const isCompleted = archive.aiStatus === 'completed' && isAllCovered;
+    const isAllCovered = totalPages > 0 && coveredPagesSet.size >= totalPages;
+    const isCompleted = archive.aiStatus === 'completed' || (isAllCovered && realQuestions.length > 0);
 
     if (isCompleted) {
-      const solvedPagesCount = attemptedPagesSet.size;
+      const solvedPagesCount = attemptedPagesSet.size || coveredPagesSet.size || totalPages;
       const unattemptedPagesCount = Math.max(0, totalPages - solvedPagesCount);
 
       if (totalPages > 0 && unattemptedPagesCount > 0 && solvedPagesCount > 0) {
         return (
           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200 text-[11px] font-bold" title={`${totalPages} sayfanın ${solvedPagesCount} sayfası çözülmüş, ${unattemptedPagesCount} sayfası boş bırakılmış`}>
             <CheckCircle2 className="w-3 h-3 text-blue-600" />
-            <span>İncelendi ({solvedPagesCount}/{totalPages} Sayfa Çözüldü, {unattemptedPagesCount} Boş)</span>
+            <span>Çözülen: {solvedPagesCount}/{totalPages} Sayfa ({unattemptedPagesCount} Boş)</span>
           </span>
         );
       }
@@ -414,7 +414,7 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
       return (
         <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-bold">
           <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-          <span>{totalPages > 0 ? `Yapay Zekâ Çözdü (${totalPages}/${totalPages} Sayfa)` : 'Yapay Zekâ Çözdü'}</span>
+          <span>{totalPages > 0 ? `Çözülen: ${totalPages}/${totalPages} Sayfa` : 'Yapay Zekâ Çözdü'}</span>
         </span>
       );
     }
@@ -423,39 +423,15 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
       return (
         <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200 text-[11px] font-bold animate-pulse">
           <Hourglass className="w-3 h-3 text-amber-600" />
-          <span>Kota Bekleniyor ({coveredPagesSet.size}/{totalPages} Sayfa Hazır)</span>
-        </span>
-      );
-    }
-
-    const isActivelyProcessing = archive.aiStatus === 'processing';
-
-    if (totalPages > 0 && coveredPagesSet.size > 0 && coveredPagesSet.size < totalPages) {
-      return (
-        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200 text-[11px] font-bold">
-          {isActivelyProcessing ? (
-            <Loader2 className="w-3 h-3 text-indigo-600 animate-spin" />
-          ) : (
-            <Clock className="w-3 h-3 text-indigo-600" />
-          )}
-          <span>{isActivelyProcessing ? 'Çözülüyor' : 'Kısmen Çözüldü'} ({coveredPagesSet.size}/{totalPages} Sayfa)</span>
-        </span>
-      );
-    }
-
-    if (isActivelyProcessing) {
-      return (
-        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200 text-[11px] font-bold">
-          <Loader2 className="w-3 h-3 text-indigo-600 animate-spin" />
-          <span>{archive.aiStatusMessage || 'Çözülüyor...'}</span>
+          <span>Kota Bekleniyor (Çözülen: {coveredPagesSet.size}/{totalPages || 1})</span>
         </span>
       );
     }
 
     return (
-      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200 text-[11px] font-bold">
-        <Clock className="w-3 h-3 text-slate-500" />
-        <span>{archive.aiStatusMessage || 'Sırada Bekliyor...'}</span>
+      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200 text-[11px] font-bold">
+        <Loader2 className="w-3 h-3 text-indigo-600 animate-spin" />
+        <span>Çözülen: {coveredPagesSet.size}/{totalPages || 1} Sayfa</span>
       </span>
     );
   };
@@ -829,8 +805,11 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
                             const studentExamPhotos = (arch.sayfaFotolari && arch.sayfaFotolari.length > 0)
                               ? arch.sayfaFotolari
                               : (arch.fotografYollari && arch.fotografYollari.length > 0 ? arch.fotografYollari : []);
-                            const totalPages = studentExamPhotos.length;
+                            const totalPages = studentExamPhotos.length || (arch as any).photosCount || (arch as any).sayfaSayisi || 0;
                             const coveredPagesSet = new Set((arch.sorular || []).map(q => q.sayfaNo || (q.sayfaIndex !== undefined ? q.sayfaIndex + 1 : 1)).filter(Boolean));
+                            const realQuestions = (arch.sorular || []).filter(q => q.unite !== "Çözülmemiş / Boş Sayfa" && q.unite !== "Boş / Çözülmemiş Sayfa");
+                            const isAllCovered = totalPages > 0 && coveredPagesSet.size >= totalPages;
+                            const isCompleted = arch.aiStatus === 'completed' || (isAllCovered && realQuestions.length > 0);
                             const isPartiallySolved = totalPages > 0 && coveredPagesSet.size < totalPages;
 
                             if (isPartiallySolved && arch.aiStatus !== 'processing' && arch.aiStatus !== 'rate_limited' && arch.aiStatus !== 'error' && !arch.lastError) {
@@ -860,7 +839,7 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
                               );
                             }
 
-                            if (arch.aiStatus === 'rate_limited' || arch.aiStatus === 'processing' || arch.aiStatus === 'pending' || arch.aiStatus === 'error' || arch.lastError) {
+                             if (!isCompleted && (arch.aiStatus === 'rate_limited' || arch.aiStatus === 'processing' || arch.aiStatus === 'pending' || arch.aiStatus === 'error' || arch.lastError)) {
                               const isRateLimited = arch.aiStatus === 'rate_limited' || arch.aiStatus === 'error' || Boolean(arch.lastError);
                               const isPending = arch.aiStatus === 'pending';
                               const nextRetryTimeStr = arch.nextRetryTime ? new Date(arch.nextRetryTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }) : null;
@@ -886,10 +865,10 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
                                         <div className="font-bold text-sm flex flex-wrap items-center gap-2">
                                           <span>
                                             {isRateLimited
-                                              ? '⏳ Yapay Zekâ Kotası / Sunucu Bekleniyor (5 dk)'
+                                              ? `⏳ Yapay Zekâ Kotası / Sunucu Bekleniyor (Çözülen: ${coveredPagesSet.size}/${totalPages || 1} Sayfa)`
                                               : isPending
-                                              ? '⏳ Test Sırada Bekliyor'
-                                              : '⚡ Yapay Zekâ Soruları Çözüyor'}
+                                              ? `⏳ Test Sırada Bekliyor (Çözülen: ${coveredPagesSet.size}/${totalPages || 1} Sayfa)`
+                                              : `⚡ Yapay Zekâ Soruları Çözüyor (Çözülen: ${coveredPagesSet.size}/${totalPages || 1} Sayfa)`}
                                           </span>
                                           {nextRetryTimeStr && isRateLimited && (
                                             <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-200/80 text-amber-900 border border-amber-300">
@@ -1086,7 +1065,7 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
                                   )}
                                 </div>
 
-                                {/* Thumbnails Swapper */}
+                                 {/* Thumbnails Swapper */}
                                 {studentExamPhotos && studentExamPhotos.length > 0 && (
                                   <div className="flex items-center justify-between gap-2 overflow-x-auto pb-1 pt-1">
                                     <div className="flex items-center gap-1.5">
@@ -1099,6 +1078,7 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
                                             key={idx}
                                             onClick={() => {
                                               setStudentActivePageIndex(idx);
+                                              setStudentSelectedPageFilter(idx + 1);
                                               setStudentZoom(1);
                                               setStudentPan({ x: 0, y: 0 });
                                             }}

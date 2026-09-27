@@ -57,9 +57,7 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
     ? allArchives
     : (archives.length > 0 ? archives : (allArchives || []));
 
-  const [selectedArchiveId, setSelectedArchiveId] = useState<string | null>(
-    effectiveArchives[0]?.id || null
-  );
+  const [selectedArchiveId, setSelectedArchiveId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedType, setSelectedType] = useState<'Tümü' | 'TYT' | 'AYT'>('Tümü');
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
@@ -85,12 +83,10 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
   const [fullArchiveCache, setFullArchiveCache] = useState<Record<string, OgrenciSinavKaydi>>({});
   const [loadingArchiveId, setLoadingArchiveId] = useState<string | null>(null);
 
-  // Synchronize selection when archives array loads/updates
+  // Synchronize selection when archives array updates (if active selection is deleted, reset to null)
   useEffect(() => {
-    if (effectiveArchives.length > 0) {
-      if (!selectedArchiveId || !effectiveArchives.some((a) => a.id === selectedArchiveId)) {
-        setSelectedArchiveId(effectiveArchives[0].id);
-      }
+    if (selectedArchiveId && !effectiveArchives.some((a) => a.id === selectedArchiveId)) {
+      setSelectedArchiveId(null);
     }
   }, [effectiveArchives, selectedArchiveId]);
 
@@ -226,16 +222,16 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
 
   const getAIStatusTag = (arch: OgrenciSinavKaydi, isSelected: boolean) => {
     const photos = arch.sayfaFotolari || arch.fotografYollari || [];
-    const totalPages = photos.length;
+    const totalPages = photos.length || (arch as any).photosCount || (arch as any).sayfaSayisi || 0;
     const realQuestions = (arch.sorular || []).filter(q => q.unite !== "Çözülmemiş / Boş Sayfa" && q.unite !== "Boş / Çözülmemiş Sayfa");
     const coveredPagesSet = new Set((arch.sorular || []).map(q => (q.sayfaIndex !== undefined && typeof q.sayfaIndex === 'number' && q.sayfaIndex >= 0) ? q.sayfaIndex + 1 : (q.sayfaNo || 1)).filter(Boolean));
     const attemptedPagesSet = new Set(realQuestions.filter(q => q.isaretlenenSik && q.isaretlenenSik !== "Boş").map(q => (q.sayfaIndex !== undefined && typeof q.sayfaIndex === 'number' && q.sayfaIndex >= 0) ? q.sayfaIndex + 1 : (q.sayfaNo || 1)));
     
-    const isAllCovered = totalPages === 0 || (coveredPagesSet.size >= totalPages && totalPages > 0);
-    const isCompleted = arch.aiStatus === 'completed' || (isAllCovered && arch.aiStatus !== 'processing' && arch.aiStatus !== 'rate_limited');
+    const isAllCovered = totalPages > 0 && coveredPagesSet.size >= totalPages;
+    const isCompleted = arch.aiStatus === 'completed' || (isAllCovered && realQuestions.length > 0);
 
     if (isCompleted) {
-      const solvedCount = attemptedPagesSet.size;
+      const solvedCount = attemptedPagesSet.size || coveredPagesSet.size || totalPages;
       const unattemptedCount = Math.max(0, totalPages - solvedCount);
 
       if (totalPages > 0 && unattemptedCount > 0 && solvedCount > 0) {
@@ -244,7 +240,7 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
             isSelected ? 'bg-sky-400 text-slate-950' : 'bg-sky-50 text-sky-700 border border-sky-200'
           }`} title={`${totalPages} sayfanın ${solvedCount} sayfası çözüldü, ${unattemptedCount} sayfa boş bırakıldı`}>
             <CheckCircle2 className="w-3 h-3" />
-            <span>{solvedCount}/{totalPages} Çözüldü ({unattemptedCount} Boş)</span>
+            <span>Çözülen: {solvedCount}/{totalPages} ({unattemptedCount} Boş)</span>
           </span>
         );
       }
@@ -254,7 +250,7 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
           isSelected ? 'bg-emerald-400 text-slate-950' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
         }`}>
           <CheckCircle2 className="w-3 h-3" />
-          <span>{totalPages > 0 ? `Yapay Zekâ Çözdü (${totalPages} Sayfa)` : 'Yapay Zekâ Çözdü'}</span>
+          <span>{totalPages > 0 ? `Çözülen: ${totalPages}/${totalPages} Sayfa` : 'Yapay Zekâ Çözdü'}</span>
         </span>
       );
     }
@@ -265,45 +261,23 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
           isSelected ? 'bg-amber-300 text-amber-950' : 'bg-amber-50 text-amber-800 border border-amber-200'
         }`}>
           <Hourglass className="w-3 h-3" />
-          <span>Kota Bekleniyor ({coveredPagesSet.size}/{totalPages})</span>
+          <span>Kota Bekleniyor (Çözülen: {coveredPagesSet.size}/{totalPages || 1})</span>
         </span>
       );
     }
 
-    const isActivelyProcessing = arch.aiStatus === 'processing';
-
-    if (totalPages > 0 && coveredPagesSet.size > 0 && coveredPagesSet.size < totalPages) {
-      return (
-        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md flex items-center gap-1 ${
-          isSelected ? 'bg-indigo-400 text-slate-950' : 'bg-indigo-50 text-indigo-700 border border-indigo-200'
-        }`}>
-          {isActivelyProcessing ? (
-            <Loader2 className="w-3 h-3 animate-spin" />
-          ) : (
-            <Clock className="w-3 h-3" />
-          )}
-          <span>{isActivelyProcessing ? 'Çözülüyor' : 'Kısmen Çözüldü'} ({coveredPagesSet.size}/{totalPages})</span>
-        </span>
-      );
-    }
-
-    if (isActivelyProcessing) {
-      return (
-        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md flex items-center gap-1 ${
-          isSelected ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-700 border border-slate-200'
-        }`}>
-          <Loader2 className="w-3 h-3 animate-spin" />
-          <span>{arch.aiStatusMessage ? arch.aiStatusMessage.slice(0, 25) + '...' : 'Devam Ediyor'}</span>
-        </span>
-      );
-    }
+    const isActivelyProcessing = arch.aiStatus === 'processing' || arch.aiStatus === 'pending';
 
     return (
       <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md flex items-center gap-1 ${
-        isSelected ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-700 border border-slate-200'
+        isSelected ? 'bg-indigo-400 text-slate-950' : 'bg-indigo-50 text-indigo-700 border border-indigo-200'
       }`}>
-        <Clock className="w-3 h-3" />
-        <span>{arch.aiStatusMessage ? arch.aiStatusMessage.slice(0, 25) + '...' : 'Bekliyor'}</span>
+        {isActivelyProcessing ? (
+          <Loader2 className="w-3 h-3 animate-spin" />
+        ) : (
+          <Clock className="w-3 h-3" />
+        )}
+        <span>Çözülen: {coveredPagesSet.size}/{totalPages || 1} Sayfa</span>
       </span>
     );
   };
@@ -875,7 +849,13 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
 
                     {/* Status Alert for Background AI / Quota */}
                     {(() => {
-                      if (fullArch.aiStatus === 'processing' || fullArch.aiStatus === 'rate_limited' || fullArch.aiStatus === 'pending' || fullArch.aiStatus === 'error' || (fullArch.aiStatus !== 'completed' && fullArch.lastError)) {
+                      const totalPages = photos.length || (fullArch as any).photosCount || (fullArch as any).sayfaSayisi || 0;
+                      const coveredPagesSet = new Set((fullArch.sorular || []).map(q => (q.sayfaIndex !== undefined && typeof q.sayfaIndex === 'number' && q.sayfaIndex >= 0) ? q.sayfaIndex + 1 : (q.sayfaNo || 1)).filter(Boolean));
+                      const realQuestions = (fullArch.sorular || []).filter(q => q.unite !== "Çözülmemiş / Boş Sayfa" && q.unite !== "Boş / Çözülmemiş Sayfa");
+                      const isAllCovered = totalPages > 0 && coveredPagesSet.size >= totalPages;
+                      const isCompleted = fullArch.aiStatus === 'completed' || (isAllCovered && realQuestions.length > 0);
+
+                      if (!isCompleted && (fullArch.aiStatus === 'processing' || fullArch.aiStatus === 'rate_limited' || fullArch.aiStatus === 'pending' || fullArch.aiStatus === 'error' || fullArch.lastError)) {
                         const isRateLimited = fullArch.aiStatus === 'rate_limited' || fullArch.aiStatus === 'error' || Boolean(fullArch.lastError);
                         const isPending = fullArch.aiStatus === 'pending';
                         const nextRetryTimeStr = fullArch.nextRetryTime ? new Date(fullArch.nextRetryTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }) : null;
@@ -901,10 +881,10 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
                                   <div className="font-bold text-sm flex flex-wrap items-center gap-2">
                                     <span>
                                       {isRateLimited
-                                        ? '⏳ Yapay Zekâ Kotası / Sunucu Bekleniyor'
+                                        ? `⏳ Yapay Zekâ Kotası / Sunucu Bekleniyor (Çözülen: ${coveredPagesSet.size}/${totalPages || 1} Sayfa)`
                                         : isPending
-                                        ? '⏳ Test Sırada Bekliyor'
-                                        : '⚡ Yapay Zekâ Soruları Çözüyor'}
+                                        ? `⏳ Test Sırada Bekliyor (Çözülen: ${coveredPagesSet.size}/${totalPages || 1} Sayfa)`
+                                        : `⚡ Yapay Zekâ Soruları Çözüyor (Çözülen: ${coveredPagesSet.size}/${totalPages || 1} Sayfa)`}
                                     </span>
                                     {nextRetryTimeStr && isRateLimited && (
                                       <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-200/80 text-amber-900 border border-amber-300">
@@ -938,30 +918,6 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
                             <Camera className="w-4 h-4 text-indigo-600" />
                             <span>Kitapçık Fotoğrafı ({photos.length} Sayfa)</span>
                           </div>
-
-                          {photos.length > 1 && (
-                            <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-xl">
-                              {photos.map((_, idx) => (
-                                <button
-                                  key={idx}
-                                  type="button"
-                                  onClick={() => {
-                                    setActivePageIndex(idx);
-                                    setZoom(1);
-                                    setPan({ x: 0, y: 0 });
-                                    setRotation(0);
-                                  }}
-                                  className={`px-2 py-0.5 rounded-lg text-xs font-bold transition-all ${
-                                    activePageIndex === idx
-                                      ? 'bg-white text-indigo-600 shadow-2xs'
-                                      : 'text-slate-500 hover:text-slate-900'
-                                  }`}
-                                >
-                                  Sayfa {idx + 1}
-                                </button>
-                              ))}
-                            </div>
-                          )}
                         </div>
 
                         {/* Zoom / Pan Controls */}
@@ -1070,7 +1026,13 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
                               <button
                                 key={pIdx}
                                 type="button"
-                                onClick={() => setSelectedPageFilter(pIdx + 1)}
+                                onClick={() => {
+                                  setActivePageIndex(pIdx);
+                                  setSelectedPageFilter(pIdx + 1);
+                                  setZoom(1);
+                                  setPan({ x: 0, y: 0 });
+                                  setRotation(0);
+                                }}
                                 className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
                                   selectedPageFilter === pIdx + 1
                                     ? 'bg-white text-indigo-600 shadow-2xs'

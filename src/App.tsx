@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Loader2, Sparkles } from 'lucide-react';
 import { CoachingHeader } from './components/coaching/CoachingHeader';
 import { StudentListView } from './components/coaching/StudentListView';
 import { StudentProfileView } from './components/coaching/StudentProfileView';
@@ -1182,7 +1183,25 @@ export default function App() {
 
       {/* Main Content Viewport */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
-        {viewMode === 'resources' ? (
+        {isLoadingData ? (
+          <div className="bg-white border border-slate-200/90 rounded-3xl p-12 sm:p-16 flex flex-col items-center justify-center text-center space-y-4 shadow-2xs animate-in fade-in duration-300 min-h-[400px]">
+            <div className="w-16 h-16 rounded-3xl bg-indigo-50 border border-indigo-200 flex items-center justify-center shadow-md shadow-indigo-100/50">
+              <Loader2 className="w-8 h-8 text-indigo-600 animate-spin" />
+            </div>
+            <div className="space-y-1.5 max-w-md">
+              <h3 className="text-base sm:text-lg font-black text-slate-900">
+                Veriler Yükleniyor...
+              </h3>
+              <p className="text-xs text-slate-500 leading-relaxed">
+                Öğrenci profilleri, denemeler, soru takibi ve optik sınav kayıtları sunucudan yükleniyor. Lütfen bekleyin.
+              </p>
+            </div>
+            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-indigo-50/80 text-indigo-700 text-xs font-bold border border-indigo-100">
+              <Sparkles className="w-3.5 h-3.5 text-indigo-600 animate-pulse" />
+              <span>YKS & MEB Koçluk Sistemi Hazırlanıyor</span>
+            </div>
+          </div>
+        ) : viewMode === 'resources' ? (
           <ResourcesView
             books={books}
             onAddBook={handleAddBook}

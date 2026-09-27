@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   TrendingUp, 
   Target, 
@@ -22,12 +22,18 @@ import {
   Calendar,
   Layers,
   RotateCcw,
+  RotateCw,
   Clock,
-  ArrowRight
+  ArrowRight,
+  Camera,
+  ZoomIn,
+  ZoomOut,
+  Scissors
 } from 'lucide-react';
 import { Student, DenemeSinavi, SoruTakipKaydi, Kazanim, OgrenciSinavKaydi, KazanimIstatistik, SoruAnalizDetay } from '../../../types';
 import { formatDate } from '../../../utils/dateUtils';
 import { QuestionSolutionView } from '../QuestionSolutionView';
+import { getExamArchiveById } from '../../../lib/apiService';
 
 interface ReportsTabProps {
   student: Student;
@@ -104,6 +110,46 @@ export const ReportsTab: React.FC<ReportsTabProps> = ({
   const [isLoadingAi, setIsLoadingAi] = useState(false);
   const [selectedOutcomeForModal, setSelectedOutcomeForModal] = useState<KazanimIstatistik | null>(null);
   const [selectedPhotoPreview, setSelectedPhotoPreview] = useState<string | null>(null);
+  const [previewZoom, setPreviewZoom] = useState<number>(1);
+  const [previewRotation, setPreviewRotation] = useState<number>(0);
+
+  // Full archive details cache for high-res photos
+  const [fullArchiveCache, setFullArchiveCache] = useState<Record<string, OgrenciSinavKaydi>>({});
+  const [isLoadingArchivePhotos, setIsLoadingArchivePhotos] = useState<boolean>(false);
+
+  // When an outcome modal is opened, ensure high-res photos for its archives are loaded
+  useEffect(() => {
+    if (!selectedOutcomeForModal) return;
+
+    const matchedArchiveIds = new Set<string>();
+    examArchives.forEach((arch) => {
+      const hasMatch = (arch.sorular || []).some(
+        (s) =>
+          (!s.ders || s.ders.toLowerCase() === selectedOutcomeForModal.ders.toLowerCase()) &&
+          s.konu === selectedOutcomeForModal.konu
+      );
+      if (hasMatch) matchedArchiveIds.add(arch.id);
+    });
+
+    matchedArchiveIds.forEach((archId) => {
+      const cached = fullArchiveCache[archId];
+      const rawArch = examArchives.find((a) => a.id === archId);
+      const photos = cached?.sayfaFotolari || rawArch?.sayfaFotolari || [];
+      const hasFullPhotos = photos.some((p: any) => typeof p === 'string' ? p.length > 500 : Boolean(p?.imageBase64 && p.imageBase64.length > 500));
+
+      if (!hasFullPhotos) {
+        setIsLoadingArchivePhotos(true);
+        getExamArchiveById(archId)
+          .then((fullArch) => {
+            if (fullArch) {
+              setFullArchiveCache((prev) => ({ ...prev, [archId]: fullArch }));
+            }
+          })
+          .catch((err) => console.warn('getExamArchiveById error in ReportsTab:', err))
+          .finally(() => setIsLoadingArchivePhotos(false));
+      }
+    });
+  }, [selectedOutcomeForModal, examArchives]);
 
   // Handle Date Preset Changes
   const handleDatePresetChange = (preset: DatePresetType) => {
@@ -343,7 +389,7 @@ export const ReportsTab: React.FC<ReportsTabProps> = ({
       .sort((a, b) => b.basariYuzdesi - a.basariYuzdesi);
   }, [kazanimStats]);
 
-  // Compute questions for selected outcome modal drill-down (respecting active date filters)
+  // Compute questions for selected outcome modal drill-down (respecting active date filters and full high-res cache)
   const wrongQuestionsForOutcome = useMemo(() => {
     if (!selectedOutcomeForModal) return [];
 
@@ -364,23 +410,30 @@ export const ReportsTab: React.FC<ReportsTabProps> = ({
       dogruMu: boolean;
       cozumDetayi?: string;
       analizNotu?: string;
+      soruFotografYolu?: string;
       sayfaFotoUrl?: string;
+      kutu?: [number, number, number, number];
+      soruTuru?: 'coktan_secmeli' | 'bosluk_doldurma' | 'acik_uclu' | 'klasik' | 'dogru_yanlis';
     }[] = [];
 
-    filteredArchives.forEach((arch) => {
+    filteredArchives.forEach((rawArch) => {
+      const arch = fullArchiveCache[rawArch.id] ? { ...rawArch, ...fullArchiveCache[rawArch.id] } : rawArch;
       arch.sorular?.forEach((s, idx) => {
         const matchDers = !s.ders || s.ders.toLowerCase() === selectedOutcomeForModal.ders.toLowerCase();
         const matchKonu = s.konu === selectedOutcomeForModal.konu;
         if (matchDers && matchKonu) {
-          const pageIdx = Math.max(0, (s.sayfaNo || 1) - 1);
-          const pagePhoto = s.sayfaFotoUrl || (arch.sayfaFotolari && arch.sayfaFotolari[pageIdx]) || (arch.sayfaFotolari && arch.sayfaFotolari[0]);
+          const pageIdx = Math.max(0, (s.sayfaNo || (s.sayfaIndex !== undefined ? s.sayfaIndex + 1 : 1)) - 1);
+          const photos = arch.sayfaFotolari || arch.fotografYollari || [];
+          const pagePhotoRaw = s.sayfaFotoUrl || photos[pageIdx] || photos[0];
+          const pagePhoto = typeof pagePhotoRaw === 'string' ? pagePhotoRaw : ((pagePhotoRaw as any)?.imageBase64 || '');
+
           list.push({
             id: `${arch.id}-${s.soruNo || idx}`,
             archiveId: arch.id,
             sinavAdi: arch.sinavAdi,
             tarih: arch.tarih,
             soruNo: s.soruNo || (idx + 1),
-            sayfaNo: s.sayfaNo || 1,
+            sayfaNo: s.sayfaNo || (s.sayfaIndex !== undefined ? s.sayfaIndex + 1 : 1),
             ders: s.ders || selectedOutcomeForModal.ders,
             unite: s.unite,
             konu: s.konu || selectedOutcomeForModal.konu,
@@ -391,7 +444,10 @@ export const ReportsTab: React.FC<ReportsTabProps> = ({
             dogruMu: Boolean(s.dogruMu),
             cozumDetayi: s.cozumDetayi || s.cozum || 'Sorunun yapay zekâ analiz detayı indirildi.',
             analizNotu: s.analizNotu,
+            soruFotografYolu: s.soruFotografYolu,
             sayfaFotoUrl: pagePhoto,
+            kutu: s.kutu,
+            soruTuru: s.soruTuru as any,
           });
         }
       });
@@ -404,12 +460,12 @@ export const ReportsTab: React.FC<ReportsTabProps> = ({
       }
       return a.soruNo - b.soruNo;
     });
-  }, [selectedOutcomeForModal, filteredArchives]);
+  }, [selectedOutcomeForModal, filteredArchives, fullArchiveCache]);
 
   // Handler to allow editing & saving a question's mathematical solution directly from analysis modal
   const handleSaveQuestionSolution = (archiveId: string, questionNo: number, newSolution: string) => {
     if (!onSaveExamArchive) return;
-    const targetArchive = examArchives.find((a) => a.id === archiveId);
+    const targetArchive = fullArchiveCache[archiveId] || examArchives.find((a) => a.id === archiveId);
     if (!targetArchive) return;
 
     const updatedSorular = (targetArchive.sorular || []).map((q) => {
@@ -428,6 +484,33 @@ export const ReportsTab: React.FC<ReportsTabProps> = ({
       sorular: updatedSorular,
     };
 
+    setFullArchiveCache((prev) => ({ ...prev, [targetArchive.id]: updatedArchive }));
+    onSaveExamArchive(updatedArchive);
+  };
+
+  // Handler to allow saving manual question crops from analysis modal
+  const handleSaveQuestionCrop = (archiveId: string, questionNo: number, newCroppedBase64: string, newKutu: [number, number, number, number]) => {
+    if (!onSaveExamArchive) return;
+    const targetArchive = fullArchiveCache[archiveId] || examArchives.find((a) => a.id === archiveId);
+    if (!targetArchive) return;
+
+    const updatedSorular = (targetArchive.sorular || []).map((q) => {
+      if (q.soruNo === questionNo) {
+        return {
+          ...q,
+          soruFotografYolu: newCroppedBase64,
+          kutu: newKutu,
+        };
+      }
+      return q;
+    });
+
+    const updatedArchive: OgrenciSinavKaydi = {
+      ...targetArchive,
+      sorular: updatedSorular,
+    };
+
+    setFullArchiveCache((prev) => ({ ...prev, [targetArchive.id]: updatedArchive }));
     onSaveExamArchive(updatedArchive);
   };
 
@@ -943,111 +1026,164 @@ export const ReportsTab: React.FC<ReportsTabProps> = ({
 
             {/* Modal Content - Question List */}
             <div className="p-5 sm:p-6 overflow-y-auto space-y-4 flex-1">
-              <div className="flex items-center justify-between text-xs text-slate-500 pb-1 border-b border-slate-100">
+              <div className="flex items-center justify-between text-xs text-slate-500 pb-1 border-b border-slate-100 flex-wrap gap-2">
                 <span className="font-bold text-slate-700">
                   Kazanım Soruları ve Yapay Zekâ Çözümleri ({wrongQuestionsForOutcome.length} Soru)
                 </span>
                 <span className="text-[11px] text-indigo-600 font-semibold flex items-center gap-1">
-                  📐 Matematiksel Dizgi & Formül Kartları
+                  📸 Soru Fotoğrafları & Çözüm Kartları
                 </span>
               </div>
 
+              {/* Photo Loading State */}
+              {isLoadingArchivePhotos && (
+                <div className="p-3.5 rounded-2xl bg-indigo-50 border border-indigo-200 text-indigo-900 flex items-center gap-2.5 text-xs font-semibold animate-pulse">
+                  <Loader2 className="w-4 h-4 text-indigo-600 animate-spin shrink-0" />
+                  <span>Soru fotoğrafları ve yüksek çözünürlüklü kitapçık sayfaları yükleniyor...</span>
+                </div>
+              )}
+
               {wrongQuestionsForOutcome.length > 0 ? (
-                wrongQuestionsForOutcome.map((q, idx) => (
-                  <div
-                    key={q.id || idx}
-                    className={`border rounded-2xl p-4 sm:p-5 space-y-3 shadow-2xs transition-all ${
-                      q.dogruMu 
-                        ? 'bg-emerald-50/20 border-emerald-200/60' 
-                        : 'bg-slate-50/80 border-slate-200/90'
-                    }`}
-                  >
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200/60 pb-3">
-                      <div className="flex items-center gap-2">
-                        <span className={`w-7 h-7 rounded-xl font-bold text-xs flex items-center justify-center ${
-                          q.dogruMu 
-                            ? 'bg-emerald-100 text-emerald-800' 
-                            : 'bg-rose-100 text-rose-800'
-                        }`}>
-                          #{q.soruNo}
-                        </span>
-                        <div>
-                          <div className="text-xs font-bold text-slate-900">{q.sinavAdi}</div>
-                          <div className="text-[11px] text-slate-400 flex items-center gap-2 flex-wrap">
-                            <span>📅 {formatDate(q.tarih)}</span>
-                            {q.sayfaNo && <span>📄 Sayfa {q.sayfaNo}</span>}
-                            {q.kazanimKodu && (
-                              <span className="font-mono text-[10px] bg-white text-indigo-700 px-1.5 py-0.2 rounded border border-indigo-100 font-bold">
-                                {q.kazanimKodu}
-                              </span>
-                            )}
+                wrongQuestionsForOutcome.map((q, idx) => {
+                  const hasPhoto = Boolean(q.soruFotografYolu || q.sayfaFotoUrl);
+
+                  return (
+                    <div
+                      key={q.id || idx}
+                      className={`border rounded-2xl p-4 sm:p-5 space-y-3 shadow-2xs transition-all ${
+                        q.dogruMu 
+                          ? 'bg-emerald-50/20 border-emerald-200/60' 
+                          : 'bg-slate-50/80 border-slate-200/90'
+                      }`}
+                    >
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200/60 pb-3">
+                        <div className="flex items-center gap-2">
+                          <span className={`w-7 h-7 rounded-xl font-bold text-xs flex items-center justify-center ${
+                            q.dogruMu 
+                              ? 'bg-emerald-100 text-emerald-800' 
+                              : 'bg-rose-100 text-rose-800'
+                          }`}>
+                            #{q.soruNo}
+                          </span>
+                          <div>
+                            <div className="text-xs font-bold text-slate-900">{q.sinavAdi}</div>
+                            <div className="text-[11px] text-slate-400 flex items-center gap-2 flex-wrap">
+                              <span>📅 {formatDate(q.tarih)}</span>
+                              {q.sayfaNo && <span>📄 Sayfa {q.sayfaNo}</span>}
+                              {q.kazanimKodu && (
+                                <span className="font-mono text-[10px] bg-white text-indigo-700 px-1.5 py-0.2 rounded border border-indigo-100 font-bold">
+                                  {q.kazanimKodu}
+                                </span>
+                              )}
+                            </div>
                           </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <span className={`px-2.5 py-1 rounded-xl text-xs font-bold border flex items-center gap-1 ${
+                            q.dogruMu
+                              ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                              : 'bg-rose-100 text-rose-800 border-rose-200'
+                          }`}>
+                            {q.dogruMu ? (
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                            ) : (
+                              <XCircle className="w-3.5 h-3.5 text-rose-600" />
+                            )}
+                            <span>İşaretlenen: {q.isaretlenenSik}</span>
+                          </span>
+                          <span className="px-2.5 py-1 rounded-xl bg-emerald-100 text-emerald-800 text-xs font-bold border border-emerald-200 flex items-center gap-1">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>Doğru Cevap: {q.dogruCevap}</span>
+                          </span>
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2">
-                        <span className={`px-2.5 py-1 rounded-xl text-xs font-bold border flex items-center gap-1 ${
-                          q.dogruMu
-                            ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
-                            : 'bg-rose-100 text-rose-800 border-rose-200'
-                        }`}>
-                          {q.dogruMu ? (
-                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                          ) : (
-                            <XCircle className="w-3.5 h-3.5 text-rose-600" />
-                          )}
-                          <span>İşaretlenen: {q.isaretlenenSik}</span>
-                        </span>
-                        <span className="px-2.5 py-1 rounded-xl bg-emerald-100 text-emerald-800 text-xs font-bold border border-emerald-200 flex items-center gap-1">
-                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                          <span>Doğru Cevap: {q.dogruCevap}</span>
-                        </span>
-                      </div>
+                      {/* AI Coach / Question Note if available */}
+                      {q.analizNotu && (
+                        <div className="p-3 rounded-xl bg-amber-50/70 border border-amber-200/70 text-xs text-amber-900 space-y-1">
+                          <span className="font-bold flex items-center gap-1.5 text-[11px] text-amber-800">
+                            <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                            <span>Koç & AI Analiz Notu:</span>
+                          </span>
+                          <p className="text-[11px] leading-relaxed italic">{q.analizNotu}</p>
+                        </div>
+                      )}
+
+                      {/* Visual Question Crop / Page Image Card */}
+                      {hasPhoto && (
+                        <div className="bg-white rounded-2xl p-3 border border-slate-200 flex flex-col sm:flex-row items-center gap-4 shadow-2xs">
+                          <div 
+                            onClick={() => {
+                              setSelectedPhotoPreview(q.soruFotografYolu || q.sayfaFotoUrl || null);
+                              setPreviewZoom(1);
+                              setPreviewRotation(0);
+                            }}
+                            className="relative max-h-44 max-w-[240px] cursor-pointer group overflow-hidden rounded-xl bg-slate-900/5 border border-slate-200 hover:border-indigo-400 shadow-2xs hover:shadow-md transition-all shrink-0 flex items-center justify-center p-1"
+                            title="Tam ekran büyütmek için tıklayın"
+                          >
+                            <img
+                              src={q.soruFotografYolu || q.sayfaFotoUrl}
+                              alt={`Soru #${q.soruNo}`}
+                              className="max-h-40 w-auto object-contain rounded-lg group-hover:scale-105 transition-transform"
+                            />
+                            <div className="absolute inset-0 bg-slate-900/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-xs font-bold gap-1.5 backdrop-blur-2xs rounded-xl">
+                              <Eye className="w-4 h-4" />
+                              <span>Büyüt & İncele</span>
+                            </div>
+                          </div>
+
+                          <div className="space-y-1.5 text-xs text-slate-600 flex-1">
+                            <div className="font-bold text-slate-900 flex items-center gap-1.5">
+                              <Camera className="w-4 h-4 text-indigo-600 shrink-0" />
+                              <span>{q.soruFotografYolu ? `📸 Soru #${q.soruNo} Görseli` : `📄 Sayfa ${q.sayfaNo || 1} Kitapçık Fotoğrafı`}</span>
+                            </div>
+                            <p className="text-[11px] text-slate-500 leading-relaxed">
+                              {q.soruFotografYolu
+                                ? 'Yapay zekâ tarafından kitapçık sayfasından otomatik kırpılmış orijinal soru fotoğrafı.'
+                                : 'Optik kitapçık sayfasının tamamı. Aşağıdaki "Kırp" aracıyla soruyu kesebilirsiniz.'}
+                            </p>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedPhotoPreview(q.soruFotografYolu || q.sayfaFotoUrl || null);
+                                setPreviewZoom(1);
+                                setPreviewRotation(0);
+                              }}
+                              className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-600 hover:text-indigo-800 transition-colors"
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                              <span>Büyük Fotoğrafı Görüntüle</span>
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Question Solution with Mathematical Typesetting & Image Integration */}
+                      <QuestionSolutionView
+                        cozumDetayi={q.cozumDetayi}
+                        unite={q.unite}
+                        konu={q.konu}
+                        ders={q.ders}
+                        soruNo={q.soruNo}
+                        soruTuru={q.soruTuru}
+                        kazanimKodu={q.kazanimKodu}
+                        kazanimAciklama={q.kazanimAciklama}
+                        dogruCevap={q.dogruCevap}
+                        ogrenciCevabi={q.isaretlenenSik}
+                        dogruMu={q.dogruMu}
+                        durum={q.dogruMu ? 'dogru' : (q.isaretlenenSik === 'Boş' ? 'bos' : 'yanlis')}
+                        defaultExpanded={true}
+                        canEdit={Boolean(onSaveExamArchive)}
+                        onSaveSolution={(newSol) => handleSaveQuestionSolution(q.archiveId, q.soruNo, newSol)}
+                        soruFotografYolu={q.soruFotografYolu}
+                        pagePhoto={q.sayfaFotoUrl}
+                        kutu={q.kutu}
+                        onSaveCrop={(newCrop, newKutu) => handleSaveQuestionCrop(q.archiveId, q.soruNo, newCrop, newKutu)}
+                      />
                     </div>
-
-                    {/* AI Coach / Question Note if available */}
-                    {q.analizNotu && (
-                      <div className="p-3 rounded-xl bg-amber-50/70 border border-amber-200/70 text-xs text-amber-900 space-y-1">
-                        <span className="font-bold flex items-center gap-1.5 text-[11px] text-amber-800">
-                          <Sparkles className="w-3.5 h-3.5 text-amber-600" />
-                          <span>Koç & AI Analiz Notu:</span>
-                        </span>
-                        <p className="text-[11px] leading-relaxed italic">{q.analizNotu}</p>
-                      </div>
-                    )}
-
-                    {/* Question Solution with Mathematical Typesetting (LaTeX / KaTeX, Step Cards & Board Mode) */}
-                    <QuestionSolutionView
-                      cozumDetayi={q.cozumDetayi}
-                      unite={q.unite}
-                      konu={q.konu}
-                      ders={q.ders}
-                      soruNo={q.soruNo}
-                      kazanimKodu={q.kazanimKodu}
-                      kazanimAciklama={q.kazanimAciklama}
-                      dogruCevap={q.dogruCevap}
-                      ogrenciCevabi={q.isaretlenenSik}
-                      dogruMu={q.dogruMu}
-                      defaultExpanded={true}
-                      canEdit={Boolean(onSaveExamArchive)}
-                      onSaveSolution={(newSol) => handleSaveQuestionSolution(q.archiveId, q.soruNo, newSol)}
-                    />
-
-                    {/* Photo button if available */}
-                    {q.sayfaFotoUrl && (
-                      <div className="pt-1 flex items-center justify-between">
-                        <button
-                          type="button"
-                          onClick={() => setSelectedPhotoPreview(q.sayfaFotoUrl || null)}
-                          className="px-3 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-bold text-xs transition-colors flex items-center gap-1.5 cursor-pointer"
-                        >
-                          <ImageIcon className="w-4 h-4 text-indigo-600" />
-                          <span>📸 Sorunun Sayfa Fotoğrafını Büyüt ve İncele</span>
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                ))
+                  );
+                })
               ) : (
                 <div className="py-12 text-center text-slate-400 space-y-2">
                   <FileText className="w-8 h-8 mx-auto text-slate-300" />
@@ -1073,27 +1209,84 @@ export const ReportsTab: React.FC<ReportsTabProps> = ({
         </div>
       )}
 
-      {/* Photo Lightbox Preview */}
+      {/* Photo Lightbox Preview with Zoom & Rotation Controls */}
       {selectedPhotoPreview && (
-        <div className="fixed inset-0 z-60 bg-slate-950/90 flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="relative max-w-4xl max-h-[90vh] w-full bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden flex flex-col">
-            <div className="p-4 bg-slate-900 text-white flex items-center justify-between border-b border-slate-800">
+        <div className="fixed inset-0 z-60 bg-slate-950/90 flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-200">
+          <div className="relative max-w-4xl max-h-[90vh] w-full bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden flex flex-col shadow-2xl">
+            {/* Header */}
+            <div className="p-4 bg-slate-900 text-white flex items-center justify-between border-b border-slate-800 flex-wrap gap-2">
               <span className="text-xs font-bold text-slate-300 flex items-center gap-2">
-                <ImageIcon className="w-4 h-4 text-indigo-400" />
+                <Camera className="w-4 h-4 text-indigo-400" />
                 <span>📸 Soru / Sayfa Kitapçığı Fotoğrafı</span>
               </span>
-              <button
-                onClick={() => setSelectedPhotoPreview(null)}
-                className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
+
+              {/* Zoom & Rotation Controls */}
+              <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1 bg-slate-800 p-1 rounded-xl border border-slate-700">
+                  <button
+                    type="button"
+                    onClick={() => setPreviewZoom((z) => Math.min(z + 0.25, 3))}
+                    className="p-1.5 text-slate-300 hover:text-white hover:bg-slate-700 rounded-lg transition-colors cursor-pointer"
+                    title="Yakınlaştır"
+                  >
+                    <ZoomIn className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPreviewZoom((z) => Math.max(z - 0.25, 0.5))}
+                    className="p-1.5 text-slate-300 hover:text-white hover:bg-slate-700 rounded-lg transition-colors cursor-pointer"
+                    title="Uzaklaştır"
+                  >
+                    <ZoomOut className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPreviewRotation((r) => (r - 90 + 360) % 360)}
+                    className="p-1.5 text-slate-300 hover:text-white hover:bg-slate-700 rounded-lg transition-colors cursor-pointer"
+                    title="Sola Döndür"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPreviewRotation((r) => (r + 90) % 360)}
+                    className="p-1.5 text-slate-300 hover:text-white hover:bg-slate-700 rounded-lg transition-colors cursor-pointer"
+                    title="Sağa Döndür"
+                  >
+                    <RotateCw className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPreviewZoom(1);
+                      setPreviewRotation(0);
+                    }}
+                    className="px-2 py-1 text-[10px] font-bold text-slate-300 hover:text-white hover:bg-slate-700 rounded-lg transition-colors cursor-pointer"
+                  >
+                    Sıfırla
+                  </button>
+                </div>
+
+                <button
+                  onClick={() => setSelectedPhotoPreview(null)}
+                  className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition-colors cursor-pointer ml-1"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
-            <div className="p-4 overflow-auto flex items-center justify-center flex-1 bg-slate-950">
+
+            {/* Photo Canvas */}
+            <div className="p-4 overflow-auto flex items-center justify-center flex-1 bg-slate-950 min-h-[350px]">
               <img
                 src={selectedPhotoPreview}
                 alt="Soru Görseli"
-                className="max-h-[75vh] w-auto object-contain rounded-xl shadow-2xl"
+                style={{
+                  transform: `scale(${previewZoom}) rotate(${previewRotation}deg)`,
+                  transformOrigin: 'center center',
+                  transition: 'transform 0.1s ease-out',
+                }}
+                className="max-h-[70vh] w-auto object-contain rounded-xl shadow-2xl"
               />
             </div>
           </div>
