@@ -101,7 +101,17 @@ export default defineConfig(() => {
     build: {
       outDir: 'dist',
       emptyOutDir: true,
-      sourcemap: true,
+      sourcemap: false,
+      chunkSizeWarningLimit: 2000,
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            'vendor-react': ['react', 'react-dom'],
+            'vendor-icons': ['lucide-react'],
+            'vendor-katex': ['katex'],
+          },
+        },
+      },
     },
     server: {
       hmr: process.env.DISABLE_HMR !== 'true',
