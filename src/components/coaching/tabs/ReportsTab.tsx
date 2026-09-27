@@ -121,13 +121,19 @@ export const ReportsTab: React.FC<ReportsTabProps> = ({
   useEffect(() => {
     if (!selectedOutcomeForModal) return;
 
+    const targetDersNorm = (selectedOutcomeForModal.ders || '').replace(/\s*\((TYT|AYT|YKS)\)/i, '').trim().toLowerCase();
+    const targetKonuNorm = (selectedOutcomeForModal.konu || '').trim().toLowerCase();
+
     const matchedArchiveIds = new Set<string>();
     examArchives.forEach((arch) => {
-      const hasMatch = (arch.sorular || []).some(
-        (s) =>
-          (!s.ders || s.ders.toLowerCase() === selectedOutcomeForModal.ders.toLowerCase()) &&
-          s.konu === selectedOutcomeForModal.konu
-      );
+      const hasMatch = (arch.sorular || []).some((s) => {
+        if (s.unite === 'Boş / Çözülmemiş Sayfa' || s.unite === 'Çözülmemiş / Boş Sayfa') return false;
+        const sDersNorm = (s.ders || '').replace(/\s*\((TYT|AYT|YKS)\)/i, '').trim().toLowerCase();
+        const sKonuNorm = (s.konu || s.unite || '').trim().toLowerCase();
+        const matchDers = !s.ders || !targetDersNorm || sDersNorm === targetDersNorm || sDersNorm.includes(targetDersNorm) || targetDersNorm.includes(sDersNorm);
+        const matchKonu = sKonuNorm === targetKonuNorm || sKonuNorm.includes(targetKonuNorm) || targetKonuNorm.includes(sKonuNorm);
+        return matchDers && matchKonu;
+      });
       if (hasMatch) matchedArchiveIds.add(arch.id);
     });
 
@@ -230,9 +236,18 @@ export const ReportsTab: React.FC<ReportsTabProps> = ({
     return list;
   }, [questions, examArchives, curriculum, selectedTrack]);
 
+  // Filter student's own questions and exam archives first
+  const studentQuestions = useMemo(() => {
+    return questions.filter((q) => !q.studentId || q.studentId === student.id);
+  }, [questions, student.id]);
+
+  const studentArchives = useMemo(() => {
+    return examArchives.filter((a) => !a.studentId || a.studentId === student.id || a.ogrenciAdSoyad === student.adSoyad);
+  }, [examArchives, student.id, student.adSoyad]);
+
   // Filtered Questions based on Date, Track & Lesson
   const filteredQuestions = useMemo(() => {
-    return questions.filter((q) => {
+    return studentQuestions.filter((q) => {
       // Date filter
       if (!isDateInRange(q.tarih, startDate, endDate)) {
         return false;
@@ -263,17 +278,17 @@ export const ReportsTab: React.FC<ReportsTabProps> = ({
 
       return true;
     });
-  }, [questions, startDate, endDate, selectedTrack, selectedLesson]);
+  }, [studentQuestions, startDate, endDate, selectedTrack, selectedLesson]);
 
   // Filtered Archives based on Date
   const filteredArchives = useMemo(() => {
-    return examArchives.filter((arch) => isDateInRange(arch.tarih, startDate, endDate));
-  }, [examArchives, startDate, endDate]);
+    return studentArchives.filter((arch) => isDateInRange(arch.tarih, startDate, endDate));
+  }, [studentArchives, startDate, endDate]);
 
   // Filtered Practice Exams based on Date
   const filteredExams = useMemo(() => {
-    return exams.filter((e) => isDateInRange(e.tarih, startDate, endDate));
-  }, [exams, startDate, endDate]);
+    return exams.filter((e) => (!e.studentId || e.studentId === student.id) && isDateInRange(e.tarih, startDate, endDate));
+  }, [exams, student.id, startDate, endDate]);
 
   // Compute aggregate question stats
   const totalQuestions = filteredQuestions.reduce((acc, q) => acc + q.cozulenSoru, 0);
@@ -296,14 +311,20 @@ export const ReportsTab: React.FC<ReportsTabProps> = ({
   const kazanimStats: KazanimIstatistik[] = useMemo(() => {
     const map = new Map<string, KazanimIstatistik>();
 
-    // From question tracking
+    // 1. From question tracking table (Soru Takibi)
     filteredQuestions.forEach((q) => {
-      const key = `${q.ders}-${q.konu}`;
+      const rawDers = (q.ders || 'Matematik').trim();
+      const rawKonu = (q.konu || 'Genel Konu').trim();
+      if (!rawKonu || rawKonu === 'Boş Sayfa' || rawKonu.includes('Çözülmemiş')) return;
+
+      const normDers = rawDers.replace(/\s*\((TYT|AYT|YKS)\)/i, '').trim();
+      const key = `${normDers}::${rawKonu.toLowerCase()}`;
+
       const existing = map.get(key) || {
-        kazanimKodu: `KOD.${q.ders.slice(0, 3)}`,
-        kazanimAciklama: `${q.ders} ${q.konu} temel kazanımı`,
-        ders: q.ders,
-        konu: q.konu,
+        kazanimKodu: `KOD.${normDers.slice(0, 3).toUpperCase()}`,
+        kazanimAciklama: `${normDers} ${rawKonu} temel kazanımı`,
+        ders: normDers,
+        konu: rawKonu,
         toplamSoru: 0,
         dogruSayisi: 0,
         yanlisSayisi: 0,
@@ -311,47 +332,53 @@ export const ReportsTab: React.FC<ReportsTabProps> = ({
         basariYuzdesi: 0,
       };
 
-      existing.toplamSoru += q.cozulenSoru;
-      existing.dogruSayisi += q.dogruSayisi;
-      existing.yanlisSayisi += q.yanlisSayisi;
-      existing.bosSayisi += q.bosSayisi;
+      existing.toplamSoru += (q.cozulenSoru || 0);
+      existing.dogruSayisi += (q.dogruSayisi || 0);
+      existing.yanlisSayisi += (q.yanlisSayisi || 0);
+      existing.bosSayisi += (q.bosSayisi || 0);
       map.set(key, existing);
     });
 
-    // From photo exam archives
+    // 2. From photo exam archives (Optik & Sınav Geçmişi)
     filteredArchives.forEach((arch) => {
       arch.sorular?.forEach((s) => {
-        const ders = s.ders || 'Genel';
+        if (s.unite === 'Boş / Çözülmemiş Sayfa' || s.unite === 'Çözülmemiş / Boş Sayfa' || s.konu === 'Boş Sayfa' || s.konu === 'Çözülmemiş Sayfa') return;
+
+        const rawDers = (s.ders || 'Matematik').trim();
+        const rawKonu = (s.konu || s.unite || 'Genel Konu').trim();
+        if (!rawKonu || rawKonu === 'Boş Sayfa' || rawKonu.includes('Çözülmemiş')) return;
 
         // Check track match
-        if (selectedTrack === 'Sayısal' && !['Matematik', 'Geometri', 'Fizik', 'Kimya', 'Biyoloji', 'Fen Bilimleri'].some((d) => ders.toLowerCase().includes(d.toLowerCase()))) {
+        if (selectedTrack === 'Sayısal' && !['Matematik', 'Geometri', 'Fizik', 'Kimya', 'Biyoloji', 'Fen Bilimleri'].some((d) => rawDers.toLowerCase().includes(d.toLowerCase()))) {
           return;
         }
-        if (selectedTrack === 'Eşit Ağırlık' && !['Matematik', 'Geometri', 'Türkçe', 'Edebiyat', 'Tarih', 'Coğrafya'].some((d) => ders.toLowerCase().includes(d.toLowerCase()))) {
+        if (selectedTrack === 'Eşit Ağırlık' && !['Matematik', 'Geometri', 'Türkçe', 'Edebiyat', 'Tarih', 'Coğrafya'].some((d) => rawDers.toLowerCase().includes(d.toLowerCase()))) {
           return;
         }
-        if (selectedTrack === 'Sözel' && !['Türkçe', 'Edebiyat', 'Tarih', 'Coğrafya', 'Felsefe', 'Din'].some((d) => ders.toLowerCase().includes(d.toLowerCase()))) {
+        if (selectedTrack === 'Sözel' && !['Türkçe', 'Edebiyat', 'Tarih', 'Coğrafya', 'Felsefe', 'Din'].some((d) => rawDers.toLowerCase().includes(d.toLowerCase()))) {
           return;
         }
-        if (selectedTrack === 'Dil' && !['Dil', 'İngilizce', 'Almanca', 'Fransızca', 'Türkçe'].some((d) => ders.toLowerCase().includes(d.toLowerCase()))) {
+        if (selectedTrack === 'Dil' && !['Dil', 'İngilizce', 'Almanca', 'Fransızca', 'Türkçe'].some((d) => rawDers.toLowerCase().includes(d.toLowerCase()))) {
           return;
         }
 
         // Check lesson match
         if (selectedLesson !== 'Tümü') {
-          const sDersNorm = ders.toLowerCase().replace(/[-_ ]/g, '');
+          const sDersNorm = rawDers.toLowerCase().replace(/[-_ ]/g, '');
           const selNorm = selectedLesson.toLowerCase().replace(/[-_ ]/g, '');
           if (!sDersNorm.includes(selNorm) && !selNorm.includes(sDersNorm)) {
             return;
           }
         }
 
-        const key = `${ders}-${s.konu}`;
+        const normDers = rawDers.replace(/\s*\((TYT|AYT|YKS)\)/i, '').trim();
+        const key = `${normDers}::${rawKonu.toLowerCase()}`;
+
         const existing = map.get(key) || {
-          kazanimKodu: s.kazanimKodu || 'GENEL',
-          kazanimAciklama: s.kazanimAciklama || `${ders} ${s.konu}`,
-          ders: ders,
-          konu: s.konu,
+          kazanimKodu: s.kazanimKodu || `KOD.${normDers.slice(0, 3).toUpperCase()}`,
+          kazanimAciklama: s.kazanimAciklama || `${normDers} ${rawKonu}`,
+          ders: normDers,
+          konu: rawKonu,
           toplamSoru: 0,
           dogruSayisi: 0,
           yanlisSayisi: 0,
@@ -360,13 +387,22 @@ export const ReportsTab: React.FC<ReportsTabProps> = ({
         };
 
         existing.toplamSoru += 1;
-        if (s.dogruMu) {
+
+        const choice = (s.isaretlenenSik || s.ogrenciCevabi || '').trim();
+        const correctChoice = (s.dogruCevap || '').trim();
+        const isBlankChoice = !choice || choice === 'Boş' || choice === '-' || choice === 'null' || choice === 'BOŞ';
+
+        const isExplicitCorrect = s.dogruMu === true || (s.dogruMu !== false && !isBlankChoice && Boolean(correctChoice) && choice.toUpperCase() === correctChoice.toUpperCase());
+        const isExplicitWrong = s.dogruMu === false || s.durum === 'yanlis' || (!isBlankChoice && Boolean(correctChoice) && choice.toUpperCase() !== correctChoice.toUpperCase());
+
+        if (isExplicitCorrect) {
           existing.dogruSayisi += 1;
-        } else if (s.isaretlenenSik === 'Boş' || s.ogrenciCevabi === 'Boş') {
-          existing.bosSayisi += 1;
-        } else {
+        } else if (isExplicitWrong) {
           existing.yanlisSayisi += 1;
+        } else {
+          existing.bosSayisi += 1;
         }
+
         map.set(key, existing);
       });
     });
@@ -379,13 +415,18 @@ export const ReportsTab: React.FC<ReportsTabProps> = ({
 
   const weakOutcomes = useMemo(() => {
     return kazanimStats
-      .filter((k) => k.basariYuzdesi < 70)
-      .sort((a, b) => a.basariYuzdesi - b.basariYuzdesi);
+      .filter((k) => k.toplamSoru > 0 && (k.basariYuzdesi < 70 || k.yanlisSayisi > 0))
+      .sort((a, b) => {
+        if (a.yanlisSayisi !== b.yanlisSayisi) {
+          return b.yanlisSayisi - a.yanlisSayisi;
+        }
+        return a.basariYuzdesi - b.basariYuzdesi;
+      });
   }, [kazanimStats]);
 
   const strongOutcomes = useMemo(() => {
     return kazanimStats
-      .filter((k) => k.basariYuzdesi >= 70)
+      .filter((k) => k.toplamSoru > 0 && k.basariYuzdesi >= 70 && k.yanlisSayisi === 0)
       .sort((a, b) => b.basariYuzdesi - a.basariYuzdesi);
   }, [kazanimStats]);
 
@@ -416,16 +457,31 @@ export const ReportsTab: React.FC<ReportsTabProps> = ({
       soruTuru?: 'coktan_secmeli' | 'bosluk_doldurma' | 'acik_uclu' | 'klasik' | 'dogru_yanlis';
     }[] = [];
 
+    const targetDersNorm = (selectedOutcomeForModal.ders || '').replace(/\s*\((TYT|AYT|YKS)\)/i, '').trim().toLowerCase();
+    const targetKonuNorm = (selectedOutcomeForModal.konu || '').trim().toLowerCase();
+
     filteredArchives.forEach((rawArch) => {
       const arch = fullArchiveCache[rawArch.id] ? { ...rawArch, ...fullArchiveCache[rawArch.id] } : rawArch;
       arch.sorular?.forEach((s, idx) => {
-        const matchDers = !s.ders || s.ders.toLowerCase() === selectedOutcomeForModal.ders.toLowerCase();
-        const matchKonu = s.konu === selectedOutcomeForModal.konu;
+        if (s.unite === 'Boş / Çözülmemiş Sayfa' || s.unite === 'Çözülmemiş / Boş Sayfa') return;
+
+        const sDersNorm = (s.ders || '').replace(/\s*\((TYT|AYT|YKS)\)/i, '').trim().toLowerCase();
+        const sKonuNorm = (s.konu || s.unite || '').trim().toLowerCase();
+
+        const matchDers = !s.ders || !targetDersNorm || sDersNorm === targetDersNorm || sDersNorm.includes(targetDersNorm) || targetDersNorm.includes(sDersNorm);
+        const matchKonu = sKonuNorm === targetKonuNorm || sKonuNorm.includes(targetKonuNorm) || targetKonuNorm.includes(sKonuNorm);
+
         if (matchDers && matchKonu) {
           const pageIdx = Math.max(0, (s.sayfaNo || (s.sayfaIndex !== undefined ? s.sayfaIndex + 1 : 1)) - 1);
           const photos = arch.sayfaFotolari || arch.fotografYollari || [];
           const pagePhotoRaw = s.sayfaFotoUrl || photos[pageIdx] || photos[0];
           const pagePhoto = typeof pagePhotoRaw === 'string' ? pagePhotoRaw : ((pagePhotoRaw as any)?.imageBase64 || '');
+
+          const choice = (s.isaretlenenSik || s.ogrenciCevabi || '').trim();
+          const correctChoice = (s.dogruCevap || '').trim();
+          const isBlankChoice = !choice || choice === 'Boş' || choice === '-' || choice === 'null' || choice === 'BOŞ';
+
+          const isCorrect = s.dogruMu === true || (s.dogruMu !== false && !isBlankChoice && Boolean(correctChoice) && choice.toUpperCase() === correctChoice.toUpperCase());
 
           list.push({
             id: `${arch.id}-${s.soruNo || idx}`,
@@ -439,9 +495,9 @@ export const ReportsTab: React.FC<ReportsTabProps> = ({
             konu: s.konu || selectedOutcomeForModal.konu,
             kazanimKodu: s.kazanimKodu,
             kazanimAciklama: s.kazanimAciklama,
-            isaretlenenSik: s.isaretlenenSik || s.ogrenciCevabi || 'Boş',
-            dogruCevap: s.dogruCevap || 'A',
-            dogruMu: Boolean(s.dogruMu),
+            isaretlenenSik: choice || 'Boş',
+            dogruCevap: correctChoice || 'A',
+            dogruMu: isCorrect,
             cozumDetayi: s.cozumDetayi || s.cozum || 'Sorunun yapay zekâ analiz detayı indirildi.',
             analizNotu: s.analizNotu,
             soruFotografYolu: s.soruFotografYolu,

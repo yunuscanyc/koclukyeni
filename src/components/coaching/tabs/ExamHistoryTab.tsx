@@ -90,43 +90,28 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
     }
   }, [effectiveArchives, selectedArchiveId]);
 
-  // Lazy-fetch & pre-fetch full archive details (high-res page photos)
+  // Lazy-fetch full archive details (high-res page photos) ONLY when an accordion item is opened
   useEffect(() => {
-    if (!effectiveArchives || effectiveArchives.length === 0) return;
+    if (!effectiveArchives || effectiveArchives.length === 0 || !selectedArchiveId) return;
 
-    if (selectedArchiveId) {
-      const rawArch = effectiveArchives.find((a) => a.id === selectedArchiveId);
-      if (rawArch) {
-        const cached = fullArchiveCache[selectedArchiveId];
-        const photos = cached?.sayfaFotolari || rawArch.sayfaFotolari || [];
-        const hasFullPhotos = photos.some((p: any) => typeof p === 'string' ? p.length > 500 : Boolean(p?.imageBase64 && p.imageBase64.length > 500));
+    const rawArch = effectiveArchives.find((a) => a.id === selectedArchiveId);
+    if (rawArch) {
+      const cached = fullArchiveCache[selectedArchiveId];
+      const photos = cached?.sayfaFotolari || rawArch.sayfaFotolari || [];
+      const hasFullPhotos = photos.some((p: any) => typeof p === 'string' ? p.length > 500 : Boolean(p?.imageBase64 && p.imageBase64.length > 500));
 
-        if (!hasFullPhotos && loadingArchiveId !== selectedArchiveId) {
-          setLoadingArchiveId(selectedArchiveId);
-          getExamArchiveById(selectedArchiveId)
-            .then((fullArch) => {
-              if (fullArch) {
-                setFullArchiveCache((prev) => ({ ...prev, [selectedArchiveId]: fullArch }));
-              }
-            })
-            .catch((err) => console.warn('getExamArchiveById error:', err))
-            .finally(() => setLoadingArchiveId(null));
-        }
-      }
-    }
-
-    // Background pre-fetch top recent archives so switching is INSTANT
-    effectiveArchives.slice(0, 5).forEach((a) => {
-      if (!fullArchiveCache[a.id]) {
-        getExamArchiveById(a.id)
+      if (!hasFullPhotos && loadingArchiveId !== selectedArchiveId) {
+        setLoadingArchiveId(selectedArchiveId);
+        getExamArchiveById(selectedArchiveId)
           .then((fullArch) => {
             if (fullArch) {
-              setFullArchiveCache((prev) => ({ ...prev, [a.id]: fullArch }));
+              setFullArchiveCache((prev) => ({ ...prev, [selectedArchiveId]: fullArch }));
             }
           })
-          .catch(() => {});
+          .catch((err) => console.warn('getExamArchiveById error:', err))
+          .finally(() => setLoadingArchiveId(null));
       }
-    });
+    }
   }, [selectedArchiveId, effectiveArchives]);
 
   // When coach views an archive, mark it as read on the backend (isNew: false)

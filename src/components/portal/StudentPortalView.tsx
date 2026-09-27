@@ -270,21 +270,26 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
   const myAssignedResources = (assignedResources || []).filter((r) => r.studentId === student.id);
   const pendingAssignedResources = myAssignedResources.filter((r) => !r.completed);
 
-  // Background pre-fetch images for student tests so opening is INSTANT
+  // Lazy-fetch full archive images ONLY when an accordion item is opened
   useEffect(() => {
-    if (activePortalTab !== 'testler' || myArchives.length === 0) return;
-    myArchives.slice(0, 6).forEach((arch) => {
-      if (!studentArchiveCache[arch.id]) {
-        getExamArchiveById(arch.id)
-          .then((fullArch) => {
-            if (fullArch) {
-              setStudentArchiveCache((prev) => ({ ...prev, [arch.id]: fullArch }));
-            }
-          })
-          .catch(() => {});
-      }
-    });
-  }, [activePortalTab, myArchives]);
+    if (!selectedArchive) return;
+    const archId = selectedArchive.id;
+    const cached = studentArchiveCache[archId];
+    const photos = cached?.sayfaFotolari || selectedArchive.sayfaFotolari || [];
+    const hasFullPhotos = photos.some((p: any) => typeof p === 'string' ? p.length > 500 : Boolean(p?.imageBase64 && p.imageBase64.length > 500));
+
+    if (!hasFullPhotos && loadingArchiveId !== archId) {
+      setLoadingArchiveId(archId);
+      getExamArchiveById(archId)
+        .then((fullArch) => {
+          if (fullArch) {
+            setStudentArchiveCache((prev) => ({ ...prev, [archId]: fullArch }));
+          }
+        })
+        .catch((err) => console.warn('getExamArchiveById error in StudentPortalView:', err))
+        .finally(() => setLoadingArchiveId(null));
+    }
+  }, [selectedArchive]);
 
   // Synchronize selectedArchive when studentArchives updates from backend polling
   React.useEffect(() => {
