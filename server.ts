@@ -2009,22 +2009,31 @@ function addSystemLog(entry: Omit<SystemLogEntry, 'id' | 'timestamp'>) {
 
 // Multi-Tier Model Cascade for High Availability & Ultra-Fast Quota Failover
 const FLASH_VISION_CASCADE = [
+  "gemini-2.5-flash",
+  "gemini-2.0-flash",
+  "gemini-1.5-flash",
+  "gemini-2.5-pro",
+  "gemini-1.5-pro",
+  "gemini-flash-latest",
+  "gemini-3.7-flash",
+  "gemini-3.5-flash",
+  "gemini-3.6-flash",
   "gemini-3.1-pro-preview",
   "gemini-3.1-flash-image",
   "gemini-3.8-flash",
-  "gemini-3.5-flash",
-  "gemini-3.6-flash",
-  "gemini-3.7-flash",
   "gemini-3.1-flash-lite",
-  "gemini-flash-latest",
 ];
 
 const FLASH_TEXT_CASCADE = [
-  "gemini-3.6-flash",
+  "gemini-2.5-flash",
+  "gemini-2.0-flash",
+  "gemini-1.5-flash",
+  "gemini-2.5-pro",
+  "gemini-flash-latest",
   "gemini-3.7-flash",
+  "gemini-3.6-flash",
   "gemini-3.5-flash",
   "gemini-3.1-flash-lite",
-  "gemini-flash-latest",
   "gemini-3.1-pro-preview",
 ];
 
@@ -2638,7 +2647,110 @@ async function callGroqVision(
   throw new Error("Groq modelleri yanıt vermedi.");
 }
 
-// Helper: Promise timeout wrapper for model failover
+// Helper: Call Pollinations Free AI Text (No API Key Required - Open Multi-Model)
+async function callPollinationsText(params: {
+  prompt: string;
+  systemInstruction?: string;
+  jsonMode?: boolean;
+}): Promise<string> {
+  const models = ["openai", "mistral", "qwen-coder", "deepseek"];
+  for (const model of models) {
+    try {
+      console.log(`[Pollinations Free Text] Deneniyor: ${model}...`);
+      const messages = [
+        ...(params.systemInstruction
+          ? [{ role: "system", content: params.systemInstruction }]
+          : []),
+        { role: "user", content: params.prompt },
+      ];
+
+      const res = await withTimeout(
+        fetch("https://text.pollinations.ai/openai", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model,
+            messages,
+            temperature: 0.1,
+            jsonMode: params.jsonMode ?? true,
+          }),
+        }),
+        20000,
+        `Pollinations ${model} zaman aşımına uğradı.`
+      );
+
+      if (res.ok) {
+        const json: any = await res.json().catch(async () => {
+          const rawText = await res.text();
+          return { choices: [{ message: { content: rawText } }] };
+        });
+        const content = json.choices?.[0]?.message?.content || json.text || (typeof json === "string" ? json : "");
+        if (content && content.trim().length > 0) {
+          return content.trim();
+        }
+      }
+    } catch (err: any) {
+      console.warn(`[Pollinations Free Text] ${model} başarısız:`, err?.message || err);
+    }
+  }
+  throw new Error("Pollinations free text modelleri yanıt vermedi.");
+}
+
+// Helper: Call Pollinations Free AI Vision (No API Key Required)
+async function callPollinationsVision(params: {
+  prompt: string;
+  mimeType: string;
+  cleanBase64: string;
+}): Promise<string> {
+  const models = ["openai", "mistral"];
+  for (const model of models) {
+    try {
+      console.log(`[Pollinations Free Vision] Deneniyor: ${model}...`);
+      const res = await withTimeout(
+        fetch("https://text.pollinations.ai/openai", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model,
+            messages: [
+              {
+                role: "system",
+                content: "Sen test/optik sayfaları okuyan ve JSON döndüren uzman bir öğretmensin.",
+              },
+              {
+                role: "user",
+                content: [
+                  { type: "text", text: params.prompt },
+                  {
+                    type: "image_url",
+                    image_url: {
+                      url: `data:${params.mimeType};base64,${params.cleanBase64}`,
+                    },
+                  },
+                ],
+              },
+            ],
+            temperature: 0.1,
+            jsonMode: true,
+          }),
+        }),
+        25000,
+        `Pollinations Vision (${model}) zaman aşımına uğradı.`
+      );
+
+      if (res.ok) {
+        const json: any = await res.json().catch(() => ({}));
+        const content = json.choices?.[0]?.message?.content || "";
+        if (content && content.trim().length > 0) {
+          return content.trim();
+        }
+      }
+    } catch (err: any) {
+      console.warn(`[Pollinations Free Vision] ${model} başarısız:`, err?.message || err);
+    }
+  }
+  throw new Error("Pollinations free vision modelleri yanıt vermedi.");
+}
 function withTimeout<T>(promise: Promise<T>, ms: number, errorMessage: string): Promise<T> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -2851,13 +2963,30 @@ async function executeVisionWithFallback(
     }
   }
 
+  // 6. Free Pollinations AI Vision Fallback (Open & Keyless)
+  try {
+    console.log(`[Pollinations Free Vision Fallback] Pollinations Vision deneniyor...`);
+    const polText = await callPollinationsVision(params);
+    if (polText && polText.trim().length > 0) {
+      addSystemLog({
+        level: 'success',
+        source: 'gemini',
+        message: `✅ Pollinations (Açık Yapay Zekâ) ile görsel soru çözümü tamamlandı.`,
+        model: "pollinations-vision",
+      });
+      return { text: polText, usedModel: "pollinations-vision" };
+    }
+  } catch (polErr: any) {
+    console.warn(`[Pollinations Vision] Başarısız:`, polErr?.message || polErr);
+  }
+
   // If all failed, rethrow
   if (lastError) {
     (lastError as any).allModelsRateLimited = allRateLimited;
     throw lastError;
   }
 
-  throw new Error("Tüm alternatif AI modelleri (Gemini, Grok, OpenAI, OpenRouter, Groq) başarısız oldu.");
+  throw new Error("Tüm alternatif AI modelleri (Gemini, Grok, OpenAI, OpenRouter, Groq, Pollinations) başarısız oldu.");
 }
 
 // Helper: Run Text Generation with Automatic Model Failover
@@ -2923,7 +3052,26 @@ async function executeTextWithFallback(
       console.warn(`[Gemini Text Failover] ${modelName} -> ${nextModel} geçiliyor...`);
     }
   }
-  throw lastError || new Error("Tüm Flash modelleri başarısız oldu.");
+
+  // Free Pollinations Text Fallback
+  try {
+    const promptText = params.prompt || (params.parts && params.parts.map((p: any) => p.text || "").join(" ")) || "";
+    if (promptText) {
+      console.log(`[Pollinations Free Text Fallback] Pollinations Text deneniyor...`);
+      const polText = await callPollinationsText({
+        prompt: promptText,
+        systemInstruction: params.systemInstruction,
+        jsonMode: params.jsonMode,
+      });
+      if (polText && polText.trim().length > 0) {
+        return { text: polText, usedModel: "pollinations-text" };
+      }
+    }
+  } catch (polErr: any) {
+    console.warn(`[Pollinations Text Fallback] Başarısız:`, polErr?.message || polErr);
+  }
+
+  throw lastError || new Error("Tüm Flash ve alternatif metin modelleri başarısız oldu.");
 }
 
 // Health check endpoint

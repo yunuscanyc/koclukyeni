@@ -41,8 +41,7 @@ import {
   MessageSquare,
   Flame,
   ArrowRight,
-  Download,
-  Scissors
+  Download
 } from 'lucide-react';
 import { Student, OgrenciSinavKaydi, Kazanim, SoruAnalizDetay, CoachNote, WeeklyScheduleTask, SoruTakipKaydi, DenemeSinavi, StudentAssignedResource, BookDifficulty } from '../../types';
 import { StudentTestUploadModal } from './StudentTestUploadModal';
@@ -53,7 +52,6 @@ import { WeeklyScheduleTab } from '../coaching/tabs/WeeklyScheduleTab';
 import { QuestionsTab } from '../coaching/tabs/QuestionsTab';
 import { CurriculumExplorer } from '../coaching/CurriculumExplorer';
 import { formatDate } from '../../utils/dateUtils';
-import { batchCropArchiveQuestions } from '../../utils/imageCropper';
 
 interface StudentPortalViewProps {
   student: Student;
@@ -120,7 +118,6 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
   const [studentArchiveCache, setStudentArchiveCache] = useState<Record<string, OgrenciSinavKaydi>>({});
   const [isDownloadingStudentZip, setIsDownloadingStudentZip] = useState(false);
   const [studentZipProgress, setStudentZipProgress] = useState('');
-  const [isStudentCropping, setIsStudentCropping] = useState(false);
 
   const showPortalToast = (text: string, type: 'success' | 'info' | 'error' = 'success') => {
     setPortalToast({ text, type });
@@ -262,120 +259,6 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
       showPortalToast('Sıfırlama sırasında bağlantı hatası oluştu.', 'error');
     } finally {
       setTimeout(() => setRetryingArchiveId(null), 1500);
-    }
-  };
-
-  const handleStudentCropAllQuestions = async (archive: OgrenciSinavKaydi) => {
-    if (!archive) return;
-    let photos = archive.sayfaFotolari || archive.fotografYollari || [];
-    
-    // If photos are empty strings, load full archive first
-    const hasFull = photos.some((p: any) => typeof p === 'string' ? p.length > 500 : Boolean(p?.imageBase64 && p.imageBase64.length > 500));
-    if (!hasFull) {
-      showPortalToast('Fotoğraflar sunucudan alınıyor...', 'info');
-      try {
-        const fullArch = await getExamArchiveById(archive.id);
-        if (fullArch && (fullArch.sayfaFotolari?.length || fullArch.fotografYollari?.length)) {
-          photos = fullArch.sayfaFotolari || fullArch.fotografYollari || [];
-          setStudentArchiveCache((prev) => ({ ...prev, [archive.id]: fullArch }));
-        }
-      } catch (err) {
-        console.warn('Full archive fetch error for crop:', err);
-      }
-    }
-
-    const validPhotos = photos.filter((p: any) => 
-      (typeof p === 'string' && p.length > 50) || Boolean(p?.imageBase64 && p.imageBase64.length > 50)
-    ).map((p: any) => typeof p === 'string' ? p : p?.imageBase64 || '');
-
-    if (validPhotos.length === 0) {
-      showPortalToast('Bu sınav için geçerli sayfa fotoğrafı bulunamadı.', 'error');
-      return;
-    }
-
-    // Kullanıcı Talimatı: Soruları tek tek ayır dediğinde daha önceden çözülmüş de olsa tüm soruları silsin!
-    const determinedDers = archive.sorular?.find(q => q.ders && q.ders !== 'Genel')?.ders || (archive.sinavTuru === 'AYT' ? 'Matematik' : 'Temel Matematik');
-
-    const clearedArchive: OgrenciSinavKaydi = {
-      ...archive,
-      sorular: [],
-      toplamSoru: 0,
-      dogruSayisi: 0,
-      yanlisSayisi: 0,
-      bosSayisi: 0,
-      net: 0,
-      aiStatus: 'processing',
-      forceReset: true,
-    };
-
-    setStudentArchiveCache((prev) => ({
-      ...prev,
-      [archive.id]: clearedArchive,
-    }));
-
-    if (selectedArchive?.id === archive.id) {
-      setSelectedArchive(clearedArchive);
-    }
-
-    if (onSaveExamArchive) {
-      onSaveExamArchive(clearedArchive);
-    }
-    try {
-      await saveExamArchive(clearedArchive);
-    } catch (saveErr) {
-      console.warn('Student cleared archive save error:', saveErr);
-    }
-
-    setIsStudentCropping(true);
-    showPortalToast('Daha önce çözülmüş tüm sorular silindi! Sayfalardaki sorular sıfırdan ayrıştırılıyor...', 'info');
-
-    try {
-      const croppedSorular = await batchCropArchiveQuestions(
-        validPhotos,
-        [],
-        (msg) => showPortalToast(msg, 'info'),
-        {
-          resetAllQuestions: true,
-          defaultDers: determinedDers,
-        }
-      );
-
-      const updatedArchive: OgrenciSinavKaydi = {
-        ...archive,
-        sorular: croppedSorular,
-        toplamSoru: croppedSorular.length,
-        dogruSayisi: 0,
-        yanlisSayisi: 0,
-        bosSayisi: croppedSorular.length,
-        net: 0,
-        aiStatus: 'completed',
-        forceReset: true,
-      };
-
-      setStudentArchiveCache((prev) => ({
-        ...prev,
-        [archive.id]: updatedArchive,
-      }));
-
-      if (selectedArchive?.id === archive.id) {
-        setSelectedArchive(updatedArchive);
-      }
-
-      if (onSaveExamArchive) {
-        onSaveExamArchive(updatedArchive);
-      }
-      try {
-        await saveExamArchive(updatedArchive);
-      } catch (saveErr) {
-        console.warn('Student updated archive save error:', saveErr);
-      }
-
-      showPortalToast(`Daha önceki tüm sorular silindi ve ${croppedSorular.length} adet yeni soru sıfırdan ayrıştırıldı!`, 'success');
-    } catch (err: any) {
-      console.warn('Student crop questions error:', err);
-      showPortalToast('Soru ayrıştırma sırasında bir hata oluştu.', 'error');
-    } finally {
-      setIsStudentCropping(false);
     }
   };
 
