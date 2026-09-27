@@ -53,10 +53,11 @@ let memCoachPin: string = "998877";
 let memYoloConfig = {
   enabled: false,
   serviceUrl: "http://localhost:8000",
-  confThreshold: 0.5,
-  margin: 10,
-  minSize: 50,
+  confThreshold: 0.22,
+  margin: 0,
+  minSize: 35,
   autoDewarp: true,
+  autoRotate: true,
   lastOnlineCheck: null as string | null,
   lastOnlineStatus: false,
   lastModelName: null as string | null,
@@ -3838,7 +3839,7 @@ app.post("/api/yolo-service/test-connection", async (req, res) => {
     if (isOk) {
       memYoloConfig.lastOnlineCheck = new Date().toISOString();
       memYoloConfig.lastOnlineStatus = true;
-      memYoloConfig.lastModelName = healthData?.model_name || healthData?.model || "best_question_detector.pt";
+      memYoloConfig.lastModelName = healthData?.model_name || healthData?.model || "best.pt";
       saveYoloConfigToDisk();
       return res.json({
         success: true,
@@ -3877,6 +3878,7 @@ app.get("/api/yolo-service/download-package", async (req, res) => {
     function addDirToZip(currentDir: string, zipFolder: any) {
       const items = fs.readdirSync(currentDir);
       for (const item of items) {
+        if (item === "__pycache__" || item.endsWith(".pyc") || item === ".DS_Store") continue;
         const fullPath = path.join(currentDir, item);
         const stat = fs.statSync(fullPath);
         if (stat.isDirectory()) {
@@ -3896,16 +3898,49 @@ app.get("/api/yolo-service/download-package", async (req, res) => {
     const zipBuffer = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
     res.setHeader("Content-Type", "application/zip");
     res.setHeader("Content-Disposition", 'attachment; filename="deneme_yolo_ubuntu_paketi.zip"');
-    return res.send(zipBuffer);
+    res.setHeader("Content-Length", zipBuffer.length.toString());
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+    return res.end(zipBuffer);
   } catch (err: any) {
     console.error("YOLO zip indirme hatası:", err);
     return res.status(500).json({ error: "Paket oluşturulamadı: " + err.message });
   }
 });
 
+app.get("/api/yolo-service/package-files", async (req, res) => {
+  try {
+    const serviceDir = path.join(process.cwd(), "ubuntu_yolo_service");
+    const fileList: Array<{ path: string; content: string }> = [];
+
+    function collectFiles(currentDir: string, relativePrefix = "") {
+      if (!fs.existsSync(currentDir)) return;
+      const items = fs.readdirSync(currentDir);
+      for (const item of items) {
+        if (item === "__pycache__" || item.endsWith(".pyc") || item === ".DS_Store") continue;
+        const fullPath = path.join(currentDir, item);
+        const relPath = relativePrefix ? `${relativePrefix}/${item}` : item;
+        const stat = fs.statSync(fullPath);
+        if (stat.isDirectory()) {
+          collectFiles(fullPath, relPath);
+        } else {
+          // Read as utf-8 if text
+          const content = fs.readFileSync(fullPath, "utf-8");
+          fileList.push({ path: relPath, content });
+        }
+      }
+    }
+
+    collectFiles(serviceDir);
+    return res.json({ success: true, files: fileList });
+  } catch (err: any) {
+    console.error("YOLO dosya listesi hatası:", err);
+    return res.status(500).json({ error: "Dosyalar okunamadı: " + err.message });
+  }
+});
+
 app.post("/api/yolo-service/detect-preview", async (req, res) => {
   try {
-    const { imageBase64, serviceUrl, confThreshold, margin, minSize } = req.body;
+    const { imageBase64, serviceUrl, confThreshold, margin, minSize, autoDewarp, autoRotate, forceOrientation } = req.body;
     if (!imageBase64) {
       return res.status(400).json({ error: "Görsel verisi zorunludur." });
     }
@@ -3913,7 +3948,7 @@ app.post("/api/yolo-service/detect-preview", async (req, res) => {
     const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, "");
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 20000);
+    const timeoutId = setTimeout(() => controller.abort(), 25000);
 
     const resp = await fetch(`${targetUrl}/api/detect-questions`, {
       method: "POST",
@@ -3923,6 +3958,9 @@ app.post("/api/yolo-service/detect-preview", async (req, res) => {
         confThreshold: confThreshold ?? memYoloConfig.confThreshold,
         margin: margin ?? memYoloConfig.margin,
         minSize: minSize ?? memYoloConfig.minSize,
+        autoDewarp: autoDewarp !== undefined ? autoDewarp : memYoloConfig.autoDewarp,
+        autoRotate: autoRotate !== undefined ? autoRotate : memYoloConfig.autoRotate,
+        forceOrientation: forceOrientation !== undefined ? forceOrientation : undefined,
         returnPreview: true,
       }),
       signal: controller.signal,
@@ -3938,6 +3976,76 @@ app.post("/api/yolo-service/detect-preview", async (req, res) => {
     return res.json(data);
   } catch (err: any) {
     return res.status(500).json({ success: false, error: err.message || "Bağlantı hatası" });
+  }
+});
+
+// =========================================================================
+// 2.0.0.1 OCR İLE METİN OKUYARAK KESİN SAYFA YÖNÜ VE DİKLEŞTİRME TESPİTİ
+// =========================================================================
+app.post("/api/yolo-service/detect-orientation-ocr", async (req, res) => {
+  try {
+    const { imageBase64, mimeType = "image/jpeg" } = req.body;
+    if (!imageBase64) {
+      return res.status(400).json({ error: "Görsel verisi zorunludur." });
+    }
+    const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, "");
+    const ai = getGeminiClient();
+    if (!ai) {
+      return res.status(500).json({ success: false, error: "Yapay zeka istemcisi hazır değil." });
+    }
+
+    const OrientationSchema = {
+      type: Type.OBJECT,
+      properties: {
+        rotationNeeded: {
+          type: Type.INTEGER,
+          description: "Görseli insan gözünün rahatça okuyabileceği dikey, düz A4 haline getirmek için SAAT YÖNÜNDE uygulanması gereken dönüş açısı: 0 (zaten düz), 90 (90 derece sağa), 180 (baş aşağı ters), veya 270 (saat yönünün tersine 90 / 270 derece sağa).",
+        },
+        readDirectionDescription: {
+          type: Type.STRING,
+          description: "Görseldeki Türkçe metnin şu anki yönünün kısa özeti (örn: 'Yazılar baş aşağı ters duruyor', 'Yazılar sağa yatık 90 derece')",
+        },
+        detectedTextSnippet: {
+          type: Type.STRING,
+          description: "Görselden okunan örnek 2-4 kelimelik başlık veya soru metni (örn: 'TÜRKÇE TESTİ', '1. Soru')",
+        }
+      },
+      required: ["rotationNeeded", "readDirectionDescription", "detectedTextSnippet"]
+    };
+
+    const prompt = `
+Sen uzman bir OCR ve belge yönü tespit motorusun.
+Bu görsel bir Türkçe deneme sınavı sayfasıdır (TYT/AYT).
+Görseldeki Türkçe metinleri, başlıkları, soru numaralarını ve şıkları (A, B, C, D, E) dikkatle oku.
+Metinlerin şu anda hangi yönde olduğunu ve sayfayı normal bir insanın yukarıdan aşağıya, soldan sağa doğru rahatça okuyabilmesi için SAAT YÖNÜNDE kaç derece (0, 90, 180, veya 270) döndürülmesi gerektiğini tespit et.
+
+Döndürme Kuralları:
+- 0: Sayfa zaten düzgün, başlık yukarıda, sorular soldan sağa okunuyor.
+- 90: Sayfa 90 derece saat yönünde çevrilmeli.
+- 180: Sayfa tamamen baş aşağı duruyor (yazılar ters). 180 derece çevrilmeli!
+- 270: Sayfa 90 derece saat yönünün tersine (270 derece saat yönünde) çevrilmeli.
+
+Okuduğun Türkçe metin parçasıyla birlikte JSON yanıt dön.
+`;
+
+    const { text: rawText } = await executeVisionWithFallback(ai, {
+      prompt,
+      mimeType,
+      cleanBase64,
+      temperature: 0.0,
+      responseSchema: OrientationSchema,
+    });
+
+    const parsed = JSON.parse(rawText.trim());
+    return res.json({
+      success: true,
+      rotationNeeded: parsed.rotationNeeded ?? 0,
+      description: parsed.readDirectionDescription || "Yön tespit edildi",
+      detectedText: parsed.detectedTextSnippet || "",
+    });
+  } catch (err: any) {
+    console.error("[OCR Orientation Error]:", err.message);
+    return res.status(500).json({ success: false, error: err.message });
   }
 });
 
@@ -3960,7 +4068,7 @@ app.post("/api/ai/detect-question-boxes", async (req, res) => {
       try {
         console.log(`[YOLO Service] Yerel servis sorgulanıyor: ${memYoloConfig.serviceUrl}/api/detect-questions`);
         const yoloController = new AbortController();
-        const timeoutId = setTimeout(() => yoloController.abort(), 12000);
+        const timeoutId = setTimeout(() => yoloController.abort(), 18000);
         const targetEndpoint = `${memYoloConfig.serviceUrl.replace(/\/$/, "")}/api/detect-questions`;
         
         const yoloResp = await fetch(targetEndpoint, {
@@ -3971,6 +4079,8 @@ app.post("/api/ai/detect-question-boxes", async (req, res) => {
             confThreshold: memYoloConfig.confThreshold,
             margin: memYoloConfig.margin,
             minSize: memYoloConfig.minSize,
+            autoDewarp: memYoloConfig.autoDewarp,
+            autoRotate: memYoloConfig.autoRotate,
           }),
           signal: yoloController.signal,
         });

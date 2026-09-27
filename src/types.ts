@@ -354,6 +354,7 @@ export interface YoloServiceConfig {
   margin: number;
   minSize: number;
   autoDewarp: boolean;
+  autoRotate?: boolean;
   lastOnlineCheck?: string;
   lastOnlineStatus?: boolean;
   lastModelName?: string;

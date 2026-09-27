@@ -1,6 +1,6 @@
 # 📚 Deneme Sınavı Soru Tespiti, Dewarp & YOLOv8/v11 Entegrasyon Rehberi
 
-Bu paket, deneme sınavı sayfalarındaki yay (arc) bükülmelerini ve filigranları temizleyip, yalnızca **tam ve eksiksiz soruların koordinatlarını** çıkaran özel YOLO mimarisini içerir.
+Bu paket, deneme sınavı sayfalarındaki yay (arc) bükülmelerini ve filigranları temizleyip, 90°/180°/270° dönük fotoğrafları otomatik dikleştirerek yalnızca **tam ve eksiksiz soruların koordinatlarını** çıkaran özel YOLO mimarisini içerir.
 
 ---
 
@@ -10,22 +10,22 @@ Bu paket, deneme sınavı sayfalarındaki yay (arc) bükülmelerini ve filigranl
 [Deneme Sayfası Fotoğrafı]
          │
          ▼
-[1. Perspektif Düzeltme] ──► 4 köşe tespiti & dikleştirme (OpenCV)
+[1. Otomatik Dikleştirme] ──► 90°, 180°, 270° yön algılama & ince ±25° deskew doğrultma
          │
          ▼
-[2. Yay (Arc) Dewarping] ──► Silindirik/sayfa kıvrımını sinüs haritalama ile düzeltme
+[2. Çok Bantlı Yay Dewarp] ─► 5 yatay banttan kitap kıvrımını cetvel gibi düzleştirme (Multi-Band Remap)
          │
          ▼
-[3. Filigran Temizleme] ───► Adaptive Thresholding ile gri gölgeleri & filigranları silme
+[3. Perspektif Doğrultma] ──► Belirgin 4 köşe varsa sayfayı dikdörtgen yapma (OpenCV)
          │
          ▼
-[4. YOLOv8n / v11n] ───────► Eğitilmiş soru dedektörü ile [ymin, xmin, ymax, xmax] tespiti
+[4. YOLOv8n / v11n (800px)] ─► Eğitilmiş model (best.pt) ile [ymin, xmin, ymax, xmax] tespiti
          │
          ▼
-[5. Yarım Soru Filtresi] ──► Kenarlara yapışık (margin ≤ 10) ve yarım soruları eleme
+[5. Çift Sütun Sıralama] ───► Kitapçık okuma sırası: Sol Sütun (üst->alt) sonra Sağ Sütun (üst->alt)
          │
          ▼
-[Web Uygulaması / JSON] ───► Sisteme kusursuz soru kutuları aktarılır
+[Web Uygulaması / JSON] ────► Kusursuz soru kutuları ve şıkları sisteme aktarılır
 ```
 
 ---

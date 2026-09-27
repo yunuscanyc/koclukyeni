@@ -262,8 +262,19 @@ def interactive_model_selection(base_model="yolov8n.pt"):
     print("🧠 [2/3] MODEL AĞIRLIĞI & EĞİTİM YÖNTEMİ")
     print("=" * 64)
 
-    saved_weights = "best_question_detector.pt"
-    if os.path.exists(saved_weights):
+    candidates = [
+        "best_question_detector.pt",
+        "best.pt",
+        os.path.join("runs", "question_detector", "deneme_yolo", "weights", "best.pt"),
+        os.path.join("runs", "detect", "train", "weights", "best.pt")
+    ]
+    saved_weights = None
+    for c in candidates:
+        if os.path.exists(c) and os.path.isfile(c):
+            saved_weights = c
+            break
+
+    if saved_weights:
         print(f"💡 Daha önce eğitilmiş özel modeliniz bulundu: '{saved_weights}'")
         print("  [1] ⚡ Önceki modelin ÜZERİNE DEVAM ET (Fine-Tuning / Ağırlıkları koru - Önerilen)")
         print(f"  [2] 🔄 Sıfırdan TEMİZ EĞİTİM başlat (Temel '{base_model}' ile)")

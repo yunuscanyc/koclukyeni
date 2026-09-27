@@ -232,7 +232,12 @@ export async function batchCropArchiveQuestions(
         onProgress(`Sayfa ${pageNo} / ${pagePhotos.length}: Sorular tespit ediliyor ve ayrıştırılıyor...`);
       }
 
-      const dewarpedPagePhoto = pagePhoto;
+      let dewarpedPagePhoto = pagePhoto;
+      try {
+        dewarpedPagePhoto = await dewarpAndEnhanceImage(pagePhoto);
+      } catch {
+        dewarpedPagePhoto = pagePhoto;
+      }
       let detectedBoxes: Array<{ soruNo: number; kutu: [number, number, number, number] }> = [];
 
       try {
@@ -371,6 +376,11 @@ export async function batchCropArchiveQuestions(
     const totalOnPage = pageQuestions.length;
 
     let dewarpedPagePhoto = pagePhoto;
+    try {
+      dewarpedPagePhoto = await dewarpAndEnhanceImage(pagePhoto);
+    } catch {
+      dewarpedPagePhoto = pagePhoto;
+    }
     let detectedBoxesMap: Record<number, [number, number, number, number]> = {};
 
     if (onProgress) onProgress(`Sayfa ${pageNo} için hassas soru ve şık sınırları analiz ediliyor...`);

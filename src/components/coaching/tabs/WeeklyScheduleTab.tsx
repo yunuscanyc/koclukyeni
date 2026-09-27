@@ -19,7 +19,10 @@ import {
   X,
   AlertCircle,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  CalendarPlus,
+  ArrowRight,
+  Layers
 } from 'lucide-react';
 import { WeeklyScheduleTask, ScheduleTaskType, DayOfWeek, BookResource } from '../../../types';
 import { formatDate } from '../../../utils/dateUtils';
@@ -221,6 +224,11 @@ export const WeeklyScheduleTab: React.FC<WeeklyScheduleTabProps> = ({
   const [editingTask, setEditingTask] = useState<WeeklyScheduleTask | null>(null);
   const [detailModalTask, setDetailModalTask] = useState<WeeklyScheduleTask | null>(null);
   const [showCopyModal, setShowCopyModal] = useState(false);
+  const [showCopyNextWeekModal, setShowCopyNextWeekModal] = useState(false);
+  const [copyResetCompleted, setCopyResetCompleted] = useState(true);
+  const [copyAutoNavigate, setCopyAutoNavigate] = useState(true);
+  const [copyReplaceExisting, setCopyReplaceExisting] = useState(false);
+  const [copySuccessNotice, setCopySuccessNotice] = useState<{ count: number; fromWeek: string; toWeek: string } | null>(null);
 
   // Close open modals on ESC key press
   useEffect(() => {
@@ -233,6 +241,8 @@ export const WeeklyScheduleTab: React.FC<WeeklyScheduleTabProps> = ({
           setDetailModalTask(null);
         } else if (showCopyModal) {
           setShowCopyModal(false);
+        } else if (showCopyNextWeekModal) {
+          setShowCopyNextWeekModal(false);
         }
       }
     };
@@ -241,7 +251,7 @@ export const WeeklyScheduleTab: React.FC<WeeklyScheduleTabProps> = ({
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [modalOpen, detailModalTask, showCopyModal]);
+  }, [modalOpen, detailModalTask, showCopyModal, showCopyNextWeekModal]);
 
   // Range Selection State (First click -> Last click)
   const [selectionStart, setSelectionStart] = useState<{ day: DayOfWeek; slotIndex: number } | null>(null);
@@ -422,6 +432,82 @@ export const WeeklyScheduleTab: React.FC<WeeklyScheduleTabProps> = ({
     setShowCopyModal(false);
   };
 
+  // Sonraki Hafta Bilgileri & Simetrik Kopyalama
+  const nextMondayDate = new Date(currentMonday);
+  nextMondayDate.setDate(currentMonday.getDate() + 7);
+  const nextWeekRangeLabel = getWeekRangeLabel(nextMondayDate);
+  const nextWeekDays = getWeekDays(nextMondayDate);
+  const nextWeekDates = nextWeekDays.map(formatDateYYYYMMDD);
+
+  // Sonraki haftada zaten kayıtlı olan görevler
+  const nextWeekExistingTasks = tasks.filter((t) => {
+    const dayIdx = DAYS.findIndex((d) => d.id === t.gun);
+    if (dayIdx === -1) return false;
+    return t.tarih && t.tarih === nextWeekDates[dayIdx];
+  });
+
+  // Haftayı Sonraki Haftaya Simetrik Kopyala (Tek tuşla ve Veritabanı Güncellemesiyle)
+  const handleCopyWeekToNextWeek = (
+    replaceExisting = copyReplaceExisting,
+    resetCompleted = copyResetCompleted,
+    autoNavigate = copyAutoNavigate
+  ) => {
+    if (currentWeekTasks.length === 0) {
+      alert('Mevcut haftada kopyalanacak görev bulunamadı. Lütfen önce bu haftaya ders veya etüt görevi ekleyin.');
+      return;
+    }
+
+    // Eğer hedef haftadaki eski görevler temizlenecekse sil
+    if (replaceExisting && nextWeekExistingTasks.length > 0 && onDeleteTask) {
+      nextWeekExistingTasks.forEach((t) => onDeleteTask(t.id));
+    }
+
+    // Mevcut haftadaki tüm görevleri simetrik olarak sonraki haftanın tarihleriyle eşle
+    const newTasks: Omit<WeeklyScheduleTask, 'id'>[] = currentWeekTasks.map((t) => {
+      const dayIdx = DAYS.findIndex((d) => d.id === t.gun);
+      const targetTarih = dayIdx !== -1 ? nextWeekDates[dayIdx] : undefined;
+
+      return {
+        studentId: t.studentId || studentId || '',
+        gun: t.gun,
+        baslangicSaat: t.baslangicSaat,
+        bitisSaat: t.bitisSaat,
+        gorevTuru: t.gorevTuru,
+        baslik: t.baslik,
+        ders: t.ders,
+        konular: t.konular,
+        hedefSoruSayisi: t.hedefSoruSayisi,
+        kaynak: t.kaynak,
+        gorusmeNotu: t.gorusmeNotu,
+        aciklama: t.aciklama,
+        tamamlandi: resetCompleted ? false : Boolean(t.tamamlandi),
+        tarih: targetTarih,
+      };
+    });
+
+    if (onBulkAddTasks) {
+      onBulkAddTasks(newTasks);
+    } else {
+      newTasks.forEach((nt) => onAddTask?.(nt));
+    }
+
+    // Bildirim göster
+    setCopySuccessNotice({
+      count: newTasks.length,
+      fromWeek: getWeekRangeLabel(currentMonday),
+      toWeek: nextWeekRangeLabel,
+    });
+
+    setTimeout(() => {
+      setCopySuccessNotice(null);
+    }, 7000);
+
+    if (autoNavigate) {
+      setCurrentMonday(nextMondayDate);
+    }
+    setShowCopyNextWeekModal(false);
+  };
+
   // Load Preset Template
   const handleLoadPreset = () => {
     if (!confirm('Yoğun YKS Sayısal Haftalık Çalışma Şablonu yüklensin mi? (Mevcut programın üzerine eklenecektir)')) return;
@@ -504,8 +590,23 @@ export const WeeklyScheduleTab: React.FC<WeeklyScheduleTabProps> = ({
             {!isStudentView && (
               <>
                 <button
+                  onClick={() => setShowCopyNextWeekModal(true)}
+                  disabled={currentWeekTasks.length === 0}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-all shadow-xs hover:shadow-sm active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                  title="Mevcut haftadaki tüm programı sonraki haftaya simetrik olarak kopyalar ve veritabanına kaydeder"
+                >
+                  <CalendarPlus className="w-4 h-4 text-indigo-200" />
+                  <span>Sonraki Haftaya Kopyala</span>
+                  {currentWeekTasks.length > 0 && (
+                    <span className="ml-1 px-1.5 py-0.5 bg-indigo-500/80 rounded-md text-[10px] font-black">
+                      {currentWeekTasks.length}
+                    </span>
+                  )}
+                </button>
+
+                <button
                   onClick={() => setShowCopyModal(true)}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-all"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-all cursor-pointer"
                 >
                   <Copy className="w-4 h-4 text-slate-500" />
                   <span>Günü Kopyala</span>
@@ -513,7 +614,7 @@ export const WeeklyScheduleTab: React.FC<WeeklyScheduleTabProps> = ({
 
                 <button
                   onClick={handleLoadPreset}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs font-bold transition-all"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs font-bold transition-all cursor-pointer"
                 >
                   <Sparkles className="w-4 h-4 text-indigo-600" />
                   <span>Örnek Şablon Yükle</span>
@@ -574,7 +675,7 @@ export const WeeklyScheduleTab: React.FC<WeeklyScheduleTabProps> = ({
             prev.setDate(currentMonday.getDate() - 7);
             setCurrentMonday(prev);
           }}
-          className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 text-xs font-black transition-all hover:shadow-2xs active:scale-98"
+          className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 text-xs font-black transition-all hover:shadow-2xs active:scale-98 cursor-pointer"
         >
           <ChevronLeft className="w-4 h-4 text-slate-500" />
           <span>Önceki Hafta</span>
@@ -587,18 +688,54 @@ export const WeeklyScheduleTab: React.FC<WeeklyScheduleTabProps> = ({
           </h3>
         </div>
 
-        <button
-          onClick={() => {
-            const next = new Date(currentMonday);
-            next.setDate(currentMonday.getDate() + 7);
-            setCurrentMonday(next);
-          }}
-          className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 text-xs font-black transition-all hover:shadow-2xs active:scale-98"
-        >
-          <span>Sonraki Hafta</span>
-          <ChevronRight className="w-4 h-4 text-slate-500" />
-        </button>
+        <div className="flex items-center gap-2 w-full sm:w-auto flex-wrap sm:flex-nowrap justify-end">
+          {!isStudentView && currentWeekTasks.length > 0 && (
+            <button
+              onClick={() => handleCopyWeekToNextWeek(false, true, true)}
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700 text-xs font-black transition-all hover:shadow-2xs active:scale-98 cursor-pointer"
+              title="Bu haftayı doğrudan sonraki haftaya simetrik olarak aktarır"
+            >
+              <ArrowRight className="w-3.5 h-3.5 text-indigo-600" />
+              <span>Sonraki Haftaya Aktar</span>
+            </button>
+          )}
+
+          <button
+            onClick={() => {
+              const next = new Date(currentMonday);
+              next.setDate(currentMonday.getDate() + 7);
+              setCurrentMonday(next);
+            }}
+            className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 text-xs font-black transition-all hover:shadow-2xs active:scale-98 cursor-pointer"
+          >
+            <span>Sonraki Hafta</span>
+            <ChevronRight className="w-4 h-4 text-slate-500" />
+          </button>
+        </div>
       </div>
+
+      {/* Success Notification Alert Banner */}
+      {copySuccessNotice && (
+        <div className="bg-emerald-600 text-white rounded-2xl p-4 px-5 flex items-center justify-between text-xs font-bold shadow-lg animate-in slide-in-from-top duration-300">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-xl bg-emerald-500 flex items-center justify-center shrink-0">
+              <Check className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <div className="text-sm font-black">Haftalık Program Başarıyla Kopyalandı!</div>
+              <div className="text-emerald-100 mt-0.5">
+                <strong>{copySuccessNotice.fromWeek}</strong> dönemindeki <strong>{copySuccessNotice.count} görev</strong>, <strong>{copySuccessNotice.toWeek}</strong> haftasına simetrik olarak aktarıldı ve veritabanına kaydedildi.
+              </div>
+            </div>
+          </div>
+          <button 
+            onClick={() => setCopySuccessNotice(null)} 
+            className="p-1.5 rounded-lg hover:bg-emerald-700 text-emerald-100 cursor-pointer transition-colors"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {/* Range Selection Instructions Alert */}
       {selectionStart ? (
@@ -1304,6 +1441,155 @@ export const WeeklyScheduleTab: React.FC<WeeklyScheduleTabProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Copy Week to Next Week Modal */}
+      {showCopyNextWeekModal && (
+        <div 
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setShowCopyNextWeekModal(false);
+            }
+          }}
+          className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in"
+        >
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl space-y-5 border border-indigo-100 animate-in zoom-in-95">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-indigo-50 border border-indigo-200 text-indigo-700 flex items-center justify-center">
+                  <CalendarPlus className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-sm sm:text-base font-black text-slate-900">
+                    Sonraki Haftaya Simetrik Kopyala
+                  </h4>
+                  <p className="text-[11px] text-slate-500">
+                    Haftalık çalışma takvimini bir sonraki haftaya simetrik olarak çoğaltın.
+                  </p>
+                </div>
+              </div>
+              <button 
+                type="button"
+                onClick={() => setShowCopyNextWeekModal(false)} 
+                className="text-slate-400 hover:text-slate-600 cursor-pointer p-1.5 rounded-xl hover:bg-slate-100 transition-colors"
+                title="Kapat (ESC)"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Week Transfer Visualizer */}
+            <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-4 space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-center">
+                <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-3xs">
+                  <div className="text-[10px] uppercase tracking-wider font-extrabold text-slate-400">Kaynak Hafta (Mevcut)</div>
+                  <div className="text-xs font-black text-slate-900 mt-0.5">{getWeekRangeLabel(currentMonday)}</div>
+                  <div className="inline-flex items-center gap-1 mt-1 text-[11px] font-bold text-indigo-600">
+                    <span>{currentWeekTasks.length} adet planlı görev</span>
+                  </div>
+                </div>
+
+                <div className="bg-indigo-50/70 p-3 rounded-xl border border-indigo-200/80 shadow-3xs">
+                  <div className="text-[10px] uppercase tracking-wider font-extrabold text-indigo-500">Hedef Hafta (Sonraki)</div>
+                  <div className="text-xs font-black text-indigo-950 mt-0.5">{nextWeekRangeLabel}</div>
+                  <div className="inline-flex items-center gap-1 mt-1 text-[11px] font-bold text-emerald-700">
+                    <CheckCircle className="w-3 h-3" />
+                    <span>Simetrik saat & gün eşlemesi</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Day Distribution Pills */}
+              <div className="pt-2 border-t border-slate-200/60">
+                <div className="text-[11px] font-bold text-slate-600 mb-1.5">Günlük Görev Dağılımı:</div>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {DAYS.map((d) => {
+                    const count = currentWeekTasks.filter(t => t.gun === d.id).length;
+                    return (
+                      <span 
+                        key={d.id} 
+                        className={`text-[10px] px-2 py-1 rounded-lg font-bold border ${
+                          count > 0 
+                            ? 'bg-white border-indigo-200 text-indigo-900' 
+                            : 'bg-slate-100 border-transparent text-slate-400'
+                        }`}
+                      >
+                        {d.short}: {count}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            {/* Target week warning if tasks already exist */}
+            {nextWeekExistingTasks.length > 0 && (
+              <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3.5 flex items-start gap-2.5 text-xs text-amber-900">
+                <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <div className="font-bold">Hedef haftada zaten {nextWeekExistingTasks.length} adet görev bulunuyor.</div>
+                  <div className="text-[11px] text-amber-800">
+                    Aşağıdaki seçenekten mevcut görevlerin üzerine eklemeyi veya sıfırdan değiştirmeyi seçebilirsiniz.
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Options */}
+            <div className="space-y-2.5 bg-slate-50/70 p-3.5 rounded-2xl border border-slate-200/60 text-xs">
+              <label className="flex items-center gap-2.5 font-bold text-slate-800 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={copyResetCompleted}
+                  onChange={(e) => setCopyResetCompleted(e.target.checked)}
+                  className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300 cursor-pointer"
+                />
+                <span>Tamamlandı durumlarını sıfırla (Yeni hafta için boş kutucuklarla başlasın)</span>
+              </label>
+
+              <label className="flex items-center gap-2.5 font-bold text-slate-800 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={copyAutoNavigate}
+                  onChange={(e) => setCopyAutoNavigate(e.target.checked)}
+                  className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300 cursor-pointer"
+                />
+                <span>Kopyalama tamamlandığında doğrudan sonraki haftaya geç</span>
+              </label>
+
+              {nextWeekExistingTasks.length > 0 && (
+                <label className="flex items-center gap-2.5 font-bold text-rose-800 cursor-pointer pt-1 border-t border-slate-200/60">
+                  <input
+                    type="checkbox"
+                    checked={copyReplaceExisting}
+                    onChange={(e) => setCopyReplaceExisting(e.target.checked)}
+                    className="w-4 h-4 rounded text-rose-600 focus:ring-rose-500 border-slate-300 cursor-pointer"
+                  />
+                  <span>Hedef haftadaki eski {nextWeekExistingTasks.length} görevi temizle ve yerine bunu koy</span>
+                </label>
+              )}
+            </div>
+
+            {/* Modal Actions */}
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowCopyNextWeekModal(false)}
+                className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 cursor-pointer transition-colors"
+              >
+                İptal (ESC)
+              </button>
+              <button
+                type="button"
+                onClick={() => handleCopyWeekToNextWeek()}
+                className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black shadow-md shadow-indigo-500/20 active:scale-95 cursor-pointer transition-all flex items-center gap-2"
+              >
+                <Check className="w-4 h-4" />
+                <span>Simetrik Kopyala ve Veritabanına Kaydet</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -17,7 +17,7 @@ sudo chown -R $USER:$USER "$TARGET_DIR"
 # 2. Sistem paketlerini güncelle ve Python ortamını kur
 echo "📦 Gerekli sistem kütüphaneleri yükleniyor..."
 sudo apt-get update
-sudo apt-get install -y python3 python3-pip python3-venv libgl1 libglib2.0-0
+sudo apt-get install -y python3 python3-pip python3-venv libgl1 libglib2.0-0 tesseract-ocr tesseract-ocr-tur
 
 # 3. Dosyaları kopyala
 echo "📋 Kodlar servis klasörüne aktarılıyor..."
