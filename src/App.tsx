@@ -19,7 +19,6 @@ import { CurriculumExplorer } from './components/coaching/CurriculumExplorer';
 import { AddStudentModal } from './components/modals/AddStudentModal';
 import { AICoachAskModal } from './components/modals/AICoachAskModal';
 import { CoachPinModal } from './components/modals/CoachPinModal';
-import { YoloServiceModal } from './components/coaching/YoloServiceModal';
 
 // Authentication & Student Portal
 import { PinScreen } from './components/auth/PinScreen';
@@ -87,7 +86,6 @@ export default function App() {
   const [viewMode, setViewMode] = useState<MainViewMode>('students');
   const [activeTab, setActiveTab] = useState<StudentProfileTab>('genel');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [isYoloModalOpen, setIsYoloModalOpen] = useState(false);
 
   // Authentication State
   const [authSession, setAuthSession] = useState<AuthSession | null>(() => {
@@ -1180,7 +1178,6 @@ export default function App() {
         onLogout={() => setAuthSession(null)}
         onMarkAllAsRead={handleMarkAllAsRead}
         onOpenCoachPinModal={() => setIsCoachPinModalOpen(true)}
-        onOpenYoloModal={() => setIsYoloModalOpen(true)}
       />
 
       {/* Main Content Viewport */}
@@ -1275,10 +1272,12 @@ export default function App() {
             {activeTab === 'sinav-gecmisi' && (
               <ExamHistoryTab
                 archives={studentArchives}
+                allArchives={examArchives}
+                activeStudent={activeStudent}
+                curriculum={curriculum}
                 onDeleteArchive={handleDeleteArchive}
                 onSaveExamArchive={handleSaveExamArchive}
                 studentName={activeStudent.adSoyad}
-                onOpenYoloModal={() => setIsYoloModalOpen(true)}
               />
             )}
 
@@ -1330,12 +1329,6 @@ export default function App() {
           }}
         />
       )}
-
-      {/* Local YOLO & Ubuntu Service Modal */}
-      <YoloServiceModal
-        isOpen={isYoloModalOpen}
-        onClose={() => setIsYoloModalOpen(false)}
-      />
 
       {/* Global Footer */}
       <footer className="bg-white border-t border-slate-200/80 py-6 text-center text-xs text-slate-500">

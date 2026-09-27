@@ -197,7 +197,7 @@ export async function cropQuestionFromPageImage(
 }
 
 /**
- * Batch crop all questions for a given archive using page photos with Local YOLO / Gemini Vision Precision Detection.
+ * Batch crop all questions for a given archive using page photos with Gemini Vision Precision Detection.
  * When resetAllQuestions is true, all previous questions and solutions are wiped clean, and fresh question items
  * are created solely from the newly detected and cropped question boxes on each page.
  */

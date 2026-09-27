@@ -23,33 +23,46 @@ import {
   Clock,
   RefreshCw,
   Download,
-  Cpu
+  Plus,
+  Users,
+  Filter
 } from 'lucide-react';
-import { OgrenciSinavKaydi, SinavSorusu, DenemeSinavi } from '../../../types';
+import { OgrenciSinavKaydi, SinavSorusu, DenemeSinavi, Student, Kazanim } from '../../../types';
 import { retryExamAIAnalysis, markArchiveAsRead, getExamArchiveById, resetAndResolveExamAI, saveExamArchive } from '../../../lib/apiService';
 import { QuestionSolutionView } from '../QuestionSolutionView';
+import { StudentTestUploadModal } from '../../portal/StudentTestUploadModal';
 import { formatDate } from '../../../utils/dateUtils';
 
 interface ExamHistoryTabProps {
   archives: OgrenciSinavKaydi[];
+  allArchives?: OgrenciSinavKaydi[];
+  activeStudent?: Student;
+  curriculum?: Kazanim[];
   onDeleteArchive: (id: string) => void;
   studentName: string;
   onSaveExamArchive?: (archive: OgrenciSinavKaydi, newDeneme?: Omit<DenemeSinavi, 'id'> | DenemeSinavi) => void;
-  onOpenYoloModal?: () => void;
 }
 
 export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
   archives,
+  allArchives,
+  activeStudent,
+  curriculum = [],
   onDeleteArchive,
   studentName,
   onSaveExamArchive,
-  onOpenYoloModal,
 }) => {
+  const [scopeFilter, setScopeFilter] = useState<'student' | 'all'>('student');
+  const effectiveArchives = (scopeFilter === 'all' && allArchives && allArchives.length > 0)
+    ? allArchives
+    : (archives.length > 0 ? archives : (allArchives || []));
+
   const [selectedArchiveId, setSelectedArchiveId] = useState<string | null>(
-    archives[0]?.id || null
+    effectiveArchives[0]?.id || null
   );
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedType, setSelectedType] = useState<'Tümü' | 'TYT' | 'AYT'>('Tümü');
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
 
   // Viewer State for the selected exam
   const [activePageIndex, setActivePageIndex] = useState<number>(0);
@@ -74,19 +87,19 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
 
   // Synchronize selection when archives array loads/updates
   useEffect(() => {
-    if (archives.length > 0) {
-      if (!selectedArchiveId || !archives.some((a) => a.id === selectedArchiveId)) {
-        setSelectedArchiveId(archives[0].id);
+    if (effectiveArchives.length > 0) {
+      if (!selectedArchiveId || !effectiveArchives.some((a) => a.id === selectedArchiveId)) {
+        setSelectedArchiveId(effectiveArchives[0].id);
       }
     }
-  }, [archives, selectedArchiveId]);
+  }, [effectiveArchives, selectedArchiveId]);
 
   // Lazy-fetch & pre-fetch full archive details (high-res page photos)
   useEffect(() => {
-    if (!archives || archives.length === 0) return;
+    if (!effectiveArchives || effectiveArchives.length === 0) return;
 
     if (selectedArchiveId) {
-      const rawArch = archives.find((a) => a.id === selectedArchiveId);
+      const rawArch = effectiveArchives.find((a) => a.id === selectedArchiveId);
       if (rawArch) {
         const cached = fullArchiveCache[selectedArchiveId];
         const photos = cached?.sayfaFotolari || rawArch.sayfaFotolari || [];
@@ -107,7 +120,7 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
     }
 
     // Background pre-fetch top recent archives so switching is INSTANT
-    archives.slice(0, 5).forEach((a) => {
+    effectiveArchives.slice(0, 5).forEach((a) => {
       if (!fullArchiveCache[a.id]) {
         getExamArchiveById(a.id)
           .then((fullArch) => {
@@ -118,31 +131,31 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
           .catch(() => {});
       }
     });
-  }, [selectedArchiveId, archives]);
+  }, [selectedArchiveId, effectiveArchives]);
 
   // When coach views an archive, mark it as read on the backend (isNew: false)
   const markedAsReadRef = React.useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (selectedArchiveId) {
-      const active = archives.find((a) => a.id === selectedArchiveId);
+      const active = effectiveArchives.find((a) => a.id === selectedArchiveId);
       if (active && (active.isNew || active.durum === 'Yeni') && !markedAsReadRef.current.has(active.id)) {
         markedAsReadRef.current.add(active.id);
         markArchiveAsRead(active.id).catch((err) => console.warn('markArchiveAsRead error:', err));
       }
     }
-  }, [selectedArchiveId, archives]);
+  }, [selectedArchiveId, effectiveArchives]);
 
-  // Automatically mark all of this student's archives in this tab as read when viewed
+  // Automatically mark all archives in this view as read when viewed
   useEffect(() => {
-    const newArchives = archives.filter((a) => (a.isNew || a.durum === 'Yeni') && !markedAsReadRef.current.has(a.id));
+    const newArchives = effectiveArchives.filter((a) => (a.isNew || a.durum === 'Yeni') && !markedAsReadRef.current.has(a.id));
     if (newArchives.length > 0) {
       newArchives.forEach((a) => {
         markedAsReadRef.current.add(a.id);
         markArchiveAsRead(a.id).catch((err) => console.warn('markArchiveAsRead error:', err));
       });
     }
-  }, [archives]);
+  }, [effectiveArchives]);
 
   const handleDownloadPhotosZip = async (arch: OgrenciSinavKaydi) => {
     if (!arch) return;
@@ -295,28 +308,34 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
     );
   };
 
-  const filteredArchives = archives.filter((a) => {
+  const filteredArchives = effectiveArchives.filter((a) => {
     const matchesType = selectedType === 'Tümü' || a.sinavTuru === selectedType;
     const matchesSearch =
-      a.sinavAdi.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      a.tarih.includes(searchQuery);
+      (a.sinavAdi || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (a.ogrenciAdSoyad || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (a.tarih || '').includes(searchQuery);
     return matchesType && matchesSearch;
   });
 
-  // Get active full archive item
+  // Get active full archive item (merging cached high-res data safely)
   const getFullArchiveItem = (arch: OgrenciSinavKaydi): OgrenciSinavKaydi => {
     const cachedItem = fullArchiveCache[arch.id];
+    if (!cachedItem) return arch;
+
+    const cachedPhotos = cachedItem.sayfaFotolari || cachedItem.fotografYollari || [];
+    const archPhotos = arch.sayfaFotolari || arch.fotografYollari || [];
+    const hasCachedFull = cachedPhotos.some((p: any) => typeof p === 'string' ? p.length > 500 : Boolean(p?.imageBase64 && p.imageBase64.length > 500));
+    const hasArchFull = archPhotos.some((p: any) => typeof p === 'string' ? p.length > 500 : Boolean(p?.imageBase64 && p.imageBase64.length > 500));
+
+    const finalPhotos = hasCachedFull ? cachedPhotos : (hasArchFull ? archPhotos : (cachedPhotos.length >= archPhotos.length ? cachedPhotos : archPhotos));
+    const finalSorular = (cachedItem.sorular && cachedItem.sorular.length > 0) ? cachedItem.sorular : (arch.sorular || []);
+
     return {
-      ...cachedItem,
       ...arch,
-      sayfaFotolari:
-        (cachedItem?.sayfaFotolari && cachedItem.sayfaFotolari.some((p: any) => typeof p === 'string' ? p.length > 500 : Boolean(p?.imageBase64 && p.imageBase64.length > 500)))
-          ? cachedItem.sayfaFotolari
-          : (arch.sayfaFotolari && arch.sayfaFotolari.some((p: any) => typeof p === 'string' ? p.length > 500 : Boolean(p?.imageBase64 && p.imageBase64.length > 500)) ? arch.sayfaFotolari : cachedItem?.sayfaFotolari || []),
-      fotografYollari:
-        (cachedItem?.fotografYollari && cachedItem.fotografYollari.some((p: any) => typeof p === 'string' ? p.length > 500 : Boolean(p?.imageBase64 && p.imageBase64.length > 500)))
-          ? cachedItem.fotografYollari
-          : (arch.fotografYollari && arch.fotografYollari.some((p: any) => typeof p === 'string' ? p.length > 500 : Boolean(p?.imageBase64 && p.imageBase64.length > 500)) ? arch.fotografYollari : cachedItem?.fotografYollari || []),
+      ...cachedItem,
+      sayfaFotolari: finalPhotos,
+      fotografYollari: finalPhotos,
+      sorular: finalSorular,
     };
   };
 
@@ -482,35 +501,80 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
     <div className="space-y-6">
       {/* Top Banner & Filters */}
       <div className="bg-white border border-slate-200/90 rounded-3xl p-6 sm:p-7 shadow-2xs space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="space-y-1">
             <div className="flex items-center gap-2">
               <div className="w-8 h-8 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
                 <Archive className="w-4 h-4" />
               </div>
               <h3 className="text-base font-bold text-slate-900">
-                9. Sınav Geçmişi & Sayfa Fotoğrafları Arşivi
+                7. Sınav Geçmişi & Optik Sayfa Arşivi
               </h3>
             </div>
             <p className="text-xs text-slate-500">
-              {studentName} için yapay zekâ optik taraması yapılmış tüm denemeler ve sayfa görselleri ({archives.length} Kayıt)
+              {scopeFilter === 'student' ? studentName : 'Tüm Öğrenciler'} için yapay zekâ optik taraması yapılmış denemeler ve kitapçık fotoğrafları ({filteredArchives.length} Kayıt)
             </p>
           </div>
 
-          <div className="flex items-center gap-1.5">
-            {['Tümü', 'TYT', 'AYT'].map((t) => (
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Scope Filter: Student vs All */}
+            {allArchives && allArchives.length > 0 && (
+              <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-2xl border border-slate-200">
+                <button
+                  type="button"
+                  onClick={() => setScopeFilter('student')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                    scopeFilter === 'student'
+                      ? 'bg-white text-indigo-700 shadow-2xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                  title={`${studentName} öğrencisine ait sınavlar`}
+                >
+                  📌 {studentName} ({archives.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setScopeFilter('all')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                    scopeFilter === 'all'
+                      ? 'bg-indigo-600 text-white shadow-2xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                  title="Tüm öğrencilerin yüklediği optik sınavlar"
+                >
+                  🌐 Tüm Öğrenciler ({allArchives.length})
+                </button>
+              </div>
+            )}
+
+            {/* TYT / AYT Type Filters */}
+            <div className="flex items-center gap-1">
+              {['Tümü', 'TYT', 'AYT'].map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setSelectedType(t as any)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border ${
+                    selectedType === t
+                      ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
+                      : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                  }`}
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
+
+            {/* New Optical Exam Upload Button */}
+            {activeStudent && (
               <button
-                key={t}
-                onClick={() => setSelectedType(t as any)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border ${
-                  selectedType === t
-                    ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
-                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-                }`}
+                type="button"
+                onClick={() => setIsUploadModalOpen(true)}
+                className="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs transition-all active:scale-95"
               >
-                {t}
+                <Camera className="w-3.5 h-3.5" />
+                <span>Optik Sınav Yükle</span>
               </button>
-            ))}
+            )}
           </div>
         </div>
 
@@ -519,7 +583,7 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
           <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
           <input
             type="text"
-            placeholder="Arşivde deneme veya tarih ara..."
+            placeholder="Arşivde deneme adı, öğrenci veya tarih ara..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full pl-9 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-2xl text-xs focus:ring-2 focus:ring-indigo-500 shadow-2xs"
@@ -550,7 +614,7 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
               net = Math.max(0, Number((testD - testY * 0.25).toFixed(2)));
             }
 
-            const photos = fullArch.sayfaFotolari || fullArch.fotografYollari || [];
+            const photos: any[] = fullArch.sayfaFotolari || fullArch.fotografYollari || [];
             const activePhoto = photos[activePageIndex] || photos[0];
             const activePhotoUrl = typeof activePhoto === 'string' ? activePhoto : (activePhoto?.imageBase64 || '');
 
@@ -570,11 +634,29 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
                 {/* Compact Card Header Bar (Clickable) */}
                 <div
                   onClick={() => {
-                    setSelectedArchiveId(isSelected ? null : arch.id);
+                    const willSelect = !isSelected;
+                    setSelectedArchiveId(willSelect ? arch.id : null);
                     setActivePageIndex(0);
                     setZoom(1);
                     setPan({ x: 0, y: 0 });
                     setRotation(0);
+
+                    if (willSelect) {
+                      const cached = fullArchiveCache[arch.id];
+                      const curPhotos = cached?.sayfaFotolari || arch.sayfaFotolari || [];
+                      const hasFull = curPhotos.some((p: any) => typeof p === 'string' ? p.length > 500 : Boolean(p?.imageBase64 && p.imageBase64.length > 500));
+                      if (!hasFull && loadingArchiveId !== arch.id) {
+                        setLoadingArchiveId(arch.id);
+                        getExamArchiveById(arch.id)
+                          .then((fetched) => {
+                            if (fetched) {
+                              setFullArchiveCache((prev) => ({ ...prev, [arch.id]: fetched }));
+                            }
+                          })
+                          .catch((err) => console.warn('getExamArchiveById error:', err))
+                          .finally(() => setLoadingArchiveId(null));
+                      }
+                    }
                   }}
                   className={`p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 cursor-pointer transition-colors ${
                     isSelected ? 'bg-indigo-50/50 border-b border-indigo-100' : 'hover:bg-slate-50/60'
@@ -654,19 +736,6 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
                           )}
                           <span>{isDownloadingZip ? (zipProgressText || 'İndiriliyor...') : `Fotoğrafları İndir (${photos.length || (fullArch as any).photosCount || 0} Sayfa .ZIP)`}</span>
                         </button>
-
-                        {/* Local YOLO / Ubuntu Service Modal Button */}
-                        {onOpenYoloModal && (
-                          <button
-                            type="button"
-                            onClick={onOpenYoloModal}
-                            className="px-2.5 py-1.5 rounded-xl border border-indigo-200 bg-indigo-50/80 hover:bg-indigo-100 text-indigo-900 text-xs font-bold flex items-center gap-1.5 transition-all shadow-2xs active:scale-95 cursor-pointer"
-                            title="Ubuntu üzerinde çalışan Yerel YOLOv8/v11 soru tespit servisi ve filigran ayarları"
-                          >
-                            <Cpu className="w-3.5 h-3.5 text-indigo-600" />
-                            <span>Yerel YOLO (Ubuntu)</span>
-                          </button>
-                        )}
 
                         {/* Kalan Sayfaları Çöz Button */}
                         <button
@@ -1163,6 +1232,23 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
           </div>
         )}
       </div>
+
+      {/* Optical Exam Upload Modal for Coach */}
+      {isUploadModalOpen && activeStudent && (
+        <StudentTestUploadModal
+          isOpen={isUploadModalOpen}
+          onClose={() => setIsUploadModalOpen(false)}
+          student={activeStudent}
+          curriculum={curriculum}
+          onTestUploaded={(newArch, newDeneme) => {
+            if (onSaveExamArchive) {
+              onSaveExamArchive(newArch, newDeneme);
+            }
+            setSelectedArchiveId(newArch.id);
+            setIsUploadModalOpen(false);
+          }}
+        />
+      )}
     </div>
   );
 };

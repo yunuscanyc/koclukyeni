@@ -703,15 +703,16 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
 
                             setSelectedArchive(arch);
                             const photos = arch.sayfaFotolari || arch.fotografYollari || [];
-                            const hasFullPhotos = photos.some((p) => typeof p === 'string' && p.length > 500);
+                            const hasFullPhotos = photos.some((p: any) => typeof p === 'string' ? p.length > 500 : Boolean(p?.imageBase64 && p.imageBase64.length > 500));
 
                             if (!hasFullPhotos) {
                               setLoadingArchiveId(arch.id);
                               try {
                                 const fullArch = await getExamArchiveById(arch.id);
                                 if (fullArch) {
-                                  setStudentArchiveCache((prev) => ({ ...prev, [arch.id]: fullArch }));
-                                  setSelectedArchive((prev) => (prev?.id === arch.id ? { ...prev, ...fullArch } : fullArch));
+                                  const mergedFull = { ...arch, ...fullArch };
+                                  setStudentArchiveCache((prev) => ({ ...prev, [arch.id]: mergedFull }));
+                                  setSelectedArchive(mergedFull);
                                 }
                               } catch (err) {
                                 console.warn('getExamArchiveById error:', err);
@@ -742,7 +743,7 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
                           {/* Image Loading Status Badge */}
                           {(() => {
                             const photos = arch.sayfaFotolari || arch.fotografYollari || [];
-                            const hasFullPhotos = photos.some((p) => typeof p === 'string' && p.length > 500);
+                            const hasFullPhotos = photos.some((p: any) => typeof p === 'string' ? p.length > 500 : Boolean(p?.imageBase64 && p.imageBase64.length > 500));
 
                             if (loadingArchiveId === arch.id) {
                               return (

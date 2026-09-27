@@ -357,97 +357,7 @@ export async function detectQuestionBoxes(
   }
 }
 
-// 13. LOCAL YOLO & UBUNTU SERVICE INTEGRATION
-export async function getYoloConfig(): Promise<any> {
-  return fetchApi<any>('/api/yolo-service/config');
-}
-
-export async function saveYoloConfig(config: any): Promise<any> {
-  return fetchApi<any>('/api/yolo-service/config', {
-    method: 'POST',
-    body: JSON.stringify(config),
-  });
-}
-
-export async function testYoloConnection(serviceUrl?: string): Promise<{
-  success: boolean;
-  status: string;
-  latency_ms?: number;
-  health?: any;
-  error?: string;
-}> {
-  // If serviceUrl is provided, attempt direct browser-to-server check first (handles localhost / local network)
-  if (serviceUrl && serviceUrl.trim()) {
-    const cleanUrl = serviceUrl.trim().replace(/\/$/, '');
-    try {
-      const startT = performance.now();
-      const ctrl = new AbortController();
-      const tId = setTimeout(() => ctrl.abort(), 3500);
-      const directResp = await fetch(`${cleanUrl}/health`, {
-        method: 'GET',
-        signal: ctrl.signal,
-      });
-      clearTimeout(tId);
-      if (directResp.ok) {
-        const healthData = await directResp.json();
-        const latency = Math.round(performance.now() - startT);
-        return {
-          success: true,
-          status: 'online',
-          latency_ms: latency,
-          health: healthData,
-        };
-      }
-    } catch {
-      // Direct browser connection failed (e.g. CORS or server-side only), fallback to proxy below
-    }
-  }
-
-  return fetchApi<any>('/api/yolo-service/test-connection', {
-    method: 'POST',
-    body: JSON.stringify({ serviceUrl }),
-  });
-}
-
-export async function testYoloDetection(imageBase64: string, options?: any): Promise<any> {
-  const serviceUrl = options?.serviceUrl;
-  // If serviceUrl is reachable directly from the browser, try direct request first
-  if (serviceUrl && serviceUrl.trim()) {
-    const cleanUrl = serviceUrl.trim().replace(/\/$/, '');
-    try {
-      const cleanB64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
-      const ctrl = new AbortController();
-      const tId = setTimeout(() => ctrl.abort(), 20000);
-      const directResp = await fetch(`${cleanUrl}/api/detect-questions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          imageBase64: cleanB64,
-          confThreshold: options?.confThreshold,
-          margin: options?.margin,
-          minSize: options?.minSize,
-          autoDewarp: options?.autoDewarp,
-          autoRotate: options?.autoRotate,
-          returnPreview: true,
-        }),
-        signal: ctrl.signal,
-      });
-      clearTimeout(tId);
-      if (directResp.ok) {
-        const directData = await directResp.json();
-        return directData;
-      }
-    } catch {
-      // Fallback to server proxy below
-    }
-  }
-
-  return fetchApi<any>('/api/yolo-service/detect-preview', {
-    method: 'POST',
-    body: JSON.stringify({ imageBase64, ...options }),
-  });
-}
-
+// 13. VISION OCR ORIENTATION
 export async function detectImageOrientationWithOcr(imageBase64: string): Promise<{
   success: boolean;
   rotationNeeded: number;
@@ -463,7 +373,7 @@ export async function detectImageOrientationWithOcr(imageBase64: string): Promis
       description: string;
       detectedText?: string;
       error?: string;
-    }>('/api/yolo-service/detect-orientation-ocr', {
+    }>('/api/vision/detect-orientation-ocr', {
       method: 'POST',
       body: JSON.stringify({ imageBase64: thumbB64 }),
     });
@@ -474,7 +384,7 @@ export async function detectImageOrientationWithOcr(imageBase64: string): Promis
       description: string;
       detectedText?: string;
       error?: string;
-    }>('/api/yolo-service/detect-orientation-ocr', {
+    }>('/api/vision/detect-orientation-ocr', {
       method: 'POST',
       body: JSON.stringify({ imageBase64 }),
     });
