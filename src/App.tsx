@@ -458,9 +458,28 @@ export default function App() {
   const activeStudent = students.find((s) => s.id === activeStudentId) || students[0] || null;
 
   // Student Actions
-  const handleSelectStudent = async (id: string) => {
+  const handleSelectStudent = async (id: string, targetTab?: StudentProfileTab) => {
     setActiveStudentId(id);
     setViewMode('student-detail');
+
+    if (targetTab) {
+      setActiveTab(targetTab);
+    } else {
+      // If student has a new exam archive, automatically open 'sinav-gecmisi' tab
+      const st = students.find((s) => s.id === id);
+      const studentHasNew = examArchives.some((a) => {
+        const isTarget = a.studentId === id || (a.ogrenciAdSoyad && st?.adSoyad && (
+          a.ogrenciAdSoyad.toLocaleLowerCase('tr-TR').trim() === st.adSoyad.toLocaleLowerCase('tr-TR').trim() ||
+          a.ogrenciAdSoyad.toLocaleLowerCase('tr-TR').includes(st.adSoyad.toLocaleLowerCase('tr-TR').trim()) ||
+          st.adSoyad.toLocaleLowerCase('tr-TR').includes(a.ogrenciAdSoyad.toLocaleLowerCase('tr-TR').trim())
+        ));
+        return isTarget && (a.isNew || a.durum === 'Yeni');
+      });
+      if (studentHasNew) {
+        setActiveTab('sinav-gecmisi');
+      }
+    }
+
     window.scrollTo({ top: 0, behavior: 'smooth' });
 
     // Mark all new archives for this student as read (isNew: false, durum: 'İncelendi') immediately
@@ -1222,6 +1241,7 @@ export default function App() {
       <CoachingHeader
         students={students}
         selectedStudent={activeStudent}
+        archives={examArchives}
         onSelectStudent={handleSelectStudent}
         viewMode={viewMode}
         onChangeViewMode={(mode) => setViewMode(mode)}

@@ -15,16 +15,17 @@ import {
   Check,
   BookOpen,
   Layers,
-  ArrowRight
+  ArrowRight,
+  Archive
 } from 'lucide-react';
-import { Student, OgrenciSinavKaydi, CurriculumTopicItem } from '../../types';
+import { Student, OgrenciSinavKaydi, StudentProfileTab } from '../../types';
 import { CurriculumExplorer } from './CurriculumExplorer';
 
 interface StudentListViewProps {
   students: Student[];
   selectedStudent: Student | null;
   archives?: OgrenciSinavKaydi[];
-  onSelectStudent: (id: string) => void;
+  onSelectStudent: (id: string, targetTab?: StudentProfileTab) => void;
   onOpenAddStudent: () => void;
   onDeleteStudent: (id: string) => void;
   onNavigateToCurriculum?: () => void;
@@ -203,10 +204,24 @@ export const StudentListView: React.FC<StudentListViewProps> = ({
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
             {filteredStudents.map((s) => {
               const isSelected = selectedStudent?.id === s.id;
+              
+              const studentArchives = (archives || []).filter((a) => {
+                if (a.studentId && a.studentId === s.id) return true;
+                if (a.ogrenciAdSoyad && s.adSoyad) {
+                  const aName = a.ogrenciAdSoyad.toLocaleLowerCase('tr-TR').trim();
+                  const sName = s.adSoyad.toLocaleLowerCase('tr-TR').trim();
+                  if (aName === sName || aName.includes(sName) || sName.includes(aName)) return true;
+                }
+                return false;
+              });
+
+              const newArchivesCount = studentArchives.filter((a) => a.isNew || a.durum === 'Yeni').length;
+              const totalArchivesCount = studentArchives.length;
+
               return (
                 <div
                   key={s.id}
-                  onClick={() => onSelectStudent(s.id)}
+                  onClick={() => onSelectStudent(s.id, newArchivesCount > 0 ? 'sinav-gecmisi' : undefined)}
                   className={`group bg-white border rounded-3xl p-5 sm:p-6 shadow-2xs hover:shadow-md transition-all cursor-pointer relative flex flex-col justify-between space-y-4 ${
                     isSelected
                       ? 'border-indigo-600 ring-2 ring-indigo-500/20'
@@ -228,10 +243,33 @@ export const StudentListView: React.FC<StudentListViewProps> = ({
                           <h3 className="text-sm font-bold text-slate-900 group-hover:text-indigo-600 transition-colors">
                             {s.adSoyad}
                           </h3>
-                          {archives.some((a) => a.studentId === s.id && a.isNew) && (
-                            <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-amber-400 text-slate-950 animate-pulse">
-                              📸 YENİ TEST
-                            </span>
+                          {newArchivesCount > 0 && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onSelectStudent(s.id, 'sinav-gecmisi');
+                              }}
+                              className="text-[9px] font-black px-2 py-0.5 rounded-full bg-amber-400 hover:bg-amber-300 text-slate-950 shadow-xs animate-pulse cursor-pointer flex items-center gap-1 transition-transform active:scale-95"
+                              title="Yeni yüklenen sınavı görüntüle"
+                            >
+                              <span>📸</span>
+                              <span>{newArchivesCount} YENİ TEST</span>
+                            </button>
+                          )}
+                          {totalArchivesCount > 0 && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onSelectStudent(s.id, 'sinav-gecmisi');
+                              }}
+                              className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 cursor-pointer flex items-center gap-1 transition-colors"
+                              title="Öğrencinin optik sınav arşivini görüntüle"
+                            >
+                              <Archive className="w-3 h-3" />
+                              <span>{totalArchivesCount} Sınav</span>
+                            </button>
                           )}
                         </div>
                         <div className="flex items-center gap-1.5 mt-0.5">
@@ -251,7 +289,7 @@ export const StudentListView: React.FC<StudentListViewProps> = ({
                           onDeleteStudent(s.id);
                         }
                       }}
-                      className="p-1.5 text-slate-300 hover:text-rose-600 rounded-lg transition-colors"
+                      className="p-1.5 text-slate-300 hover:text-rose-600 rounded-lg transition-colors cursor-pointer"
                       title="Öğrenciyi Sil"
                     >
                       <Trash2 className="w-4 h-4" />
@@ -306,10 +344,17 @@ export const StudentListView: React.FC<StudentListViewProps> = ({
 
                   {/* Action */}
                   <div className="flex items-center justify-between pt-2 border-t border-slate-100">
-                    <span className="text-[11px] font-bold text-indigo-600 flex items-center gap-1 group-hover:translate-x-1 transition-transform">
-                      <span>Detaylı Koçluk Paneli</span>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onSelectStudent(s.id, totalArchivesCount > 0 ? 'sinav-gecmisi' : 'genel');
+                      }}
+                      className="text-[11px] font-bold text-indigo-600 flex items-center gap-1 group-hover:translate-x-1 transition-transform cursor-pointer"
+                    >
+                      <span>{totalArchivesCount > 0 ? `📑 Sınavları Gör (${totalArchivesCount})` : 'Detaylı Koçluk Paneli'}</span>
                       <ChevronRight className="w-3.5 h-3.5" />
-                    </span>
+                    </button>
                     <span className="text-[10px] text-slate-400 font-semibold">
                       YKS {s.yksHedefYili}
                     </span>

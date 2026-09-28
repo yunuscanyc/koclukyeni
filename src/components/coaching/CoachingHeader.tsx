@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { 
   GraduationCap, 
   Sparkles, 
@@ -9,15 +9,21 @@ import {
   ChevronDown,
   BookOpen,
   LogOut,
-  ShieldCheck
+  ShieldCheck,
+  Archive,
+  CheckCircle2,
+  ExternalLink,
+  X
 } from 'lucide-react';
-import { Student, MainViewMode } from '../../types';
+import { Student, MainViewMode, OgrenciSinavKaydi, StudentProfileTab } from '../../types';
+import { formatDate } from '../../utils/dateUtils';
 import { PWAInstallButton } from '../pwa/PWAInstallButton';
 
 interface CoachingHeaderProps {
   students: Student[];
   selectedStudent: Student | null;
-  onSelectStudent: (id: string) => void;
+  archives?: OgrenciSinavKaydi[];
+  onSelectStudent: (id: string, targetTab?: StudentProfileTab) => void;
   viewMode: MainViewMode;
   onChangeViewMode: (mode: MainViewMode) => void;
   onOpenAddStudent: () => void;
@@ -34,6 +40,7 @@ interface CoachingHeaderProps {
 export const CoachingHeader: React.FC<CoachingHeaderProps> = ({
   students,
   selectedStudent,
+  archives = [],
   onSelectStudent,
   viewMode,
   onChangeViewMode,
@@ -47,6 +54,22 @@ export const CoachingHeader: React.FC<CoachingHeaderProps> = ({
   onMarkAllAsRead,
   onOpenCoachPinModal,
 }) => {
+  const [isNotifDropdownOpen, setIsNotifDropdownOpen] = useState(false);
+  const notifRef = useRef<HTMLDivElement>(null);
+
+  // Close notifications dropdown on outside click
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (notifRef.current && !notifRef.current.contains(e.target as Node)) {
+        setIsNotifDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const newArchives = archives.filter((a) => a.isNew || a.durum === 'Yeni');
+  const recentArchives = newArchives.length > 0 ? newArchives : archives.slice(0, 5);
   return (
     <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200/80 shadow-2xs">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -142,14 +165,109 @@ export const CoachingHeader: React.FC<CoachingHeaderProps> = ({
 
             {/* New Student Test Upload Alert Notification */}
             {newExamCount > 0 && (
-              <button
-                onClick={onMarkAllAsRead}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 hover:text-white active:scale-95 text-slate-950 text-xs font-black shadow-md shadow-amber-200/50 animate-bounce cursor-pointer transition-all"
-                title={`${newExamCount} adet yeni test var. Hepsini okundu olarak işaretlemek için tıklayın.`}
-              >
-                <span>🔔</span>
-                <span>{newExamCount} Yeni Test</span>
-              </button>
+              <div className="relative" ref={notifRef}>
+                <button
+                  type="button"
+                  onClick={() => setIsNotifDropdownOpen((prev) => !prev)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 hover:text-white active:scale-95 text-xs font-black shadow-md shadow-amber-200/50 animate-bounce cursor-pointer transition-all"
+                  title={`${newExamCount} adet yeni optik sınav var. Tıklayarak listeyi görüntüleyin ve inceleyin.`}
+                >
+                  <span>🔔</span>
+                  <span>{newExamCount} Yeni Test</span>
+                </button>
+
+                {/* Notifications Popover Dropdown */}
+                {isNotifDropdownOpen && (
+                  <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white border border-slate-200 rounded-3xl shadow-2xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-150">
+                    <div className="p-3.5 bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 text-slate-950 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="text-base">🔔</span>
+                        <h4 className="font-extrabold text-xs tracking-tight">Yeni Yüklenen Sınavlar ({newArchives.length})</h4>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setIsNotifDropdownOpen(false)}
+                        className="p-1 rounded-lg text-slate-900 hover:bg-black/10 transition-colors"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    <div className="max-h-80 overflow-y-auto divide-y divide-slate-100 p-1">
+                      {newArchives.length === 0 ? (
+                        <div className="p-5 text-center text-xs text-slate-500">
+                          Bekleyen yeni sınav bulunmuyor.
+                        </div>
+                      ) : (
+                        newArchives.map((arch) => {
+                          const matchedStudent = students.find((s) => 
+                            (arch.studentId && s.id === arch.studentId) ||
+                            (arch.ogrenciAdSoyad && s.adSoyad && (
+                              arch.ogrenciAdSoyad.toLocaleLowerCase('tr-TR').trim() === s.adSoyad.toLocaleLowerCase('tr-TR').trim() ||
+                              arch.ogrenciAdSoyad.toLocaleLowerCase('tr-TR').includes(s.adSoyad.toLocaleLowerCase('tr-TR').trim()) ||
+                              s.adSoyad.toLocaleLowerCase('tr-TR').includes(arch.ogrenciAdSoyad.toLocaleLowerCase('tr-TR').trim())
+                            ))
+                          );
+                          const targetStudentId = matchedStudent?.id || arch.studentId || students[0]?.id;
+                          const studentDisplayName = matchedStudent?.adSoyad || arch.ogrenciAdSoyad || 'Öğrenci';
+
+                          return (
+                            <div
+                              key={arch.id}
+                              onClick={() => {
+                                setIsNotifDropdownOpen(false);
+                                if (targetStudentId) {
+                                  onSelectStudent(targetStudentId, 'sinav-gecmisi');
+                                }
+                              }}
+                              className="p-3 hover:bg-indigo-50/60 rounded-2xl cursor-pointer transition-colors flex items-center justify-between gap-3 group"
+                            >
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <div className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center font-bold text-xs shrink-0">
+                                  {studentDisplayName.charAt(0)}
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="text-xs font-bold text-slate-900 truncate group-hover:text-indigo-600 transition-colors">
+                                    {studentDisplayName}
+                                  </div>
+                                  <div className="text-[11px] text-slate-500 truncate flex items-center gap-1.5">
+                                    <span className="font-semibold text-slate-700">{arch.sinavAdi}</span>
+                                    <span>•</span>
+                                    <span>{arch.sinavTuru}</span>
+                                  </div>
+                                  <div className="text-[10px] text-slate-400 mt-0.5">
+                                    {formatDate(arch.tarih)}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="shrink-0 flex items-center gap-1 text-xs font-bold text-indigo-600 group-hover:translate-x-0.5 transition-transform">
+                                <span>İncele</span>
+                                <ExternalLink className="w-3.5 h-3.5" />
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+
+                    {onMarkAllAsRead && (
+                      <div className="p-2.5 bg-slate-50 border-t border-slate-100 flex items-center justify-between gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onMarkAllAsRead();
+                            setIsNotifDropdownOpen(false);
+                          }}
+                          className="w-full text-center text-xs font-bold text-slate-600 hover:text-slate-900 py-1.5 rounded-xl hover:bg-slate-200/60 transition-colors"
+                        >
+                          Tümünü Okundu Olarak İşaretle
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             )}
 
             {/* Coach PIN Info Badge & Change Button */}

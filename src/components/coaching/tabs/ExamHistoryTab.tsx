@@ -90,10 +90,12 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
   const [fullArchiveCache, setFullArchiveCache] = useState<Record<string, OgrenciSinavKaydi>>({});
   const [loadingArchiveId, setLoadingArchiveId] = useState<string | null>(null);
 
-  // Synchronize selection when archives array updates (if active selection is deleted, reset to null)
+  // Synchronize selection when archives array updates or auto-expand if single archive
   useEffect(() => {
     if (selectedArchiveId && !effectiveArchives.some((a) => a.id === selectedArchiveId)) {
       setSelectedArchiveId(null);
+    } else if (!selectedArchiveId && effectiveArchives.length === 1) {
+      setSelectedArchiveId(effectiveArchives[0].id);
     }
   }, [effectiveArchives, selectedArchiveId]);
 
@@ -1161,9 +1163,18 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
                             </div>
                           </div>
                         ) : (
-                          <div className="text-center text-slate-500 space-y-2 p-6">
-                            <Camera className="w-8 h-8 mx-auto text-slate-600 opacity-60" />
-                            <p className="text-xs">Bu sayfa için görsel verisi yüklenemedi.</p>
+                          <div className="text-center text-slate-400 space-y-2.5 p-6 flex flex-col items-center justify-center">
+                            {loadingArchiveId === arch.id ? (
+                              <>
+                                <Loader2 className="w-8 h-8 text-indigo-500 animate-spin" />
+                                <p className="text-xs text-slate-300 font-bold">Yüksek çözünürlüklü sayfa görseli sunucudan alınıyor...</p>
+                              </>
+                            ) : (
+                              <>
+                                <Camera className="w-8 h-8 text-slate-600 opacity-60" />
+                                <p className="text-xs">Bu sayfa için görsel verisi yüklenemedi.</p>
+                              </>
+                            )}
                           </div>
                         )}
                       </div>
