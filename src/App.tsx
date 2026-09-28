@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Loader2, Sparkles } from 'lucide-react';
 import { CoachingHeader } from './components/coaching/CoachingHeader';
 import { StudentListView } from './components/coaching/StudentListView';
