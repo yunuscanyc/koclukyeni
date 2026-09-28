@@ -1144,8 +1144,15 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
                                     const isFillInBlank = q.soruTuru === 'bosluk_doldurma' || q.soruTuru === 'acik_uclu';
                                     
                                     // Single source of truth:
-                                    // If durum is 'dogru' or q.dogruMu is true, the question was solved correctly and can NEVER be blank!
-                                    const isDogru = q.durum === 'dogru' || (q.durum !== 'bos' && Boolean(q.dogruMu));
+                                    const hasOptionMatch = Boolean(
+                                      !isFillInBlank &&
+                                      q.isaretlenenSik &&
+                                      q.dogruCevap &&
+                                      q.isaretlenenSik !== 'Boş' &&
+                                      q.isaretlenenSik !== '-' &&
+                                      q.isaretlenenSik.trim().toUpperCase() === q.dogruCevap.trim().toUpperCase()
+                                    );
+                                    const isDogru = hasOptionMatch || (q.durum === 'dogru' || (q.durum !== 'bos' && Boolean(q.dogruMu)));
                                     const isBlank = !isDogru && (
                                       q.durum === 'bos' ||
                                       (isFillInBlank

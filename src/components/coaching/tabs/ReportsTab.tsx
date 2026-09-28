@@ -390,17 +390,14 @@ export const ReportsTab: React.FC<ReportsTabProps> = ({
 
         const choice = (s.isaretlenenSik || s.ogrenciCevabi || '').trim();
         const correctChoice = (s.dogruCevap || '').trim();
-        const isBlankChoice = !choice || choice === 'Boş' || choice === '-' || choice === 'null' || choice === 'BOŞ';
+        const isBlankChoice = s.durum === 'bos' || !choice || choice === 'Boş' || choice === '-' || choice === 'null' || choice === 'BOŞ';
 
-        const isExplicitCorrect = s.dogruMu === true || (s.dogruMu !== false && !isBlankChoice && Boolean(correctChoice) && choice.toUpperCase() === correctChoice.toUpperCase());
-        const isExplicitWrong = s.dogruMu === false || s.durum === 'yanlis' || (!isBlankChoice && Boolean(correctChoice) && choice.toUpperCase() !== correctChoice.toUpperCase());
-
-        if (isExplicitCorrect) {
-          existing.dogruSayisi += 1;
-        } else if (isExplicitWrong) {
-          existing.yanlisSayisi += 1;
-        } else {
+        if (isBlankChoice) {
           existing.bosSayisi += 1;
+        } else if (s.dogruMu === true || s.durum === 'dogru' || (Boolean(correctChoice) && choice.toUpperCase() === correctChoice.toUpperCase())) {
+          existing.dogruSayisi += 1;
+        } else {
+          existing.yanlisSayisi += 1;
         }
 
         map.set(key, existing);

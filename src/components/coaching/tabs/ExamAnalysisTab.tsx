@@ -110,10 +110,14 @@ export const ExamAnalysisTab: React.FC<ExamAnalysisTabProps> = ({
       if (data.success && data.sorular && Array.isArray(data.sorular) && data.sorular.length > 0) {
         const newQuestions: SinavSorusu[] = data.sorular.map((s: any, idx: number) => {
           const rawCozum = s.cozumDetayi || s.cozum || '';
-          const studentAns = s.ogrenciCevabi || s.isaretlenenSik || 'A';
+          const isBlank = s.durum === 'bos' || s.isaretlenenSik === 'Boş' || s.ogrenciCevabi === 'Boş' || (!s.isaretlenenSik && !s.ogrenciCevabi);
+          const studentAns = isBlank ? 'Boş' : (s.ogrenciCevabi || s.isaretlenenSik || '-');
+          const isDogru = !isBlank && (s.durum === 'dogru' || Boolean(s.dogruMu));
+          const durum: 'dogru' | 'yanlis' | 'bos' = isBlank ? 'bos' : (isDogru ? 'dogru' : 'yanlis');
+
           return {
             soruNo: s.soruNo || sorular.length + idx + 1,
-            ders: s.ders || 'Matematik',
+            ders: s.ders || (sinavTuru === 'AYT' ? 'AYT Genel' : 'TYT Genel'),
             unite: s.unite || '',
             konu: s.konu || 'Genel Soru',
             kazanimKodu: s.kazanimKodu || '',
@@ -123,7 +127,8 @@ export const ExamAnalysisTab: React.FC<ExamAnalysisTabProps> = ({
             ogrenciCevabi: studentAns,
             isaretlenenSik: studentAns,
             dogruCevap: s.dogruCevap || 'A',
-            dogruMu: s.dogruMu !== undefined ? Boolean(s.dogruMu) : (studentAns === s.dogruCevap && studentAns !== 'Boş'),
+            dogruMu: isDogru,
+            durum,
             analizNotu: s.analizNotu || '',
             sayfaNo: currentPageNo,
             sayfaFotoUrl: currentImageBase64,
@@ -173,12 +178,42 @@ export const ExamAnalysisTab: React.FC<ExamAnalysisTabProps> = ({
 
   const handleMouseUp = () => setIsDragging(false);
 
-  // Toggle correct/wrong for a question manually
-  // Toggle question status
-  const handleToggleQuestionStatus = (index: number) => {
+  // Update question status (Doğru, Yanlış, Boş)
+  const handleUpdateQuestionStatus = (index: number, newStatus: 'dogru' | 'yanlis' | 'bos') => {
     setSorular((prev) => {
       const copy = [...prev];
-      copy[index].dogruMu = !copy[index].dogruMu;
+      const q = copy[index];
+      const isDogru = newStatus === 'dogru';
+      const isBlank = newStatus === 'bos';
+
+      let ogrenciCevabi = q.ogrenciCevabi;
+      let isaretlenenSik = q.isaretlenenSik;
+
+      if (isBlank) {
+        ogrenciCevabi = 'Boş';
+        isaretlenenSik = 'Boş';
+      } else if (isDogru) {
+        if (!ogrenciCevabi || ogrenciCevabi === 'Boş' || ogrenciCevabi === '-') {
+          ogrenciCevabi = q.dogruCevap || 'A';
+          isaretlenenSik = q.dogruCevap || 'A';
+        }
+      } else {
+        // Yanlış: Eğer boşsa doğru cevap haricinde bir şık ata
+        if (!ogrenciCevabi || ogrenciCevabi === 'Boş' || ogrenciCevabi === '-') {
+          const options = ['A', 'B', 'C', 'D', 'E'];
+          const wrongOpt = options.find((opt) => opt !== (q.dogruCevap || 'A').toUpperCase()) || 'B';
+          ogrenciCevabi = wrongOpt;
+          isaretlenenSik = wrongOpt;
+        }
+      }
+
+      copy[index] = {
+        ...q,
+        durum: newStatus,
+        dogruMu: isDogru,
+        ogrenciCevabi,
+        isaretlenenSik,
+      };
       return copy;
     });
   };
@@ -208,14 +243,14 @@ export const ExamAnalysisTab: React.FC<ExamAnalysisTabProps> = ({
       return;
     }
 
-    const dogruSayisi = sorular.filter((s) => s.dogruMu).length;
-    const bosSayisi = sorular.filter((s) => s.ogrenciCevabi === 'Boş' || !s.ogrenciCevabi).length;
+    const dogruSayisi = sorular.filter((s) => s.durum === 'dogru' || (s.durum !== 'bos' && s.dogruMu)).length;
+    const bosSayisi = sorular.filter((s) => s.durum === 'bos' || (!s.dogruMu && (s.ogrenciCevabi === 'Boş' || s.isaretlenenSik === 'Boş' || !s.ogrenciCevabi))).length;
     const yanlisSayisi = Math.max(0, sorular.length - dogruSayisi - bosSayisi);
     
     // Boşluk doldurma / açık uçlu soruları net hesabına katma, sadece çoktan seçmeli test tiplerini kat:
     const testQ = sorular.filter((s) => !s.soruTuru || s.soruTuru === 'coktan_secmeli');
-    const testD = testQ.filter((s) => s.dogruMu).length;
-    const testB = testQ.filter((s) => s.ogrenciCevabi === 'Boş' || !s.ogrenciCevabi).length;
+    const testD = testQ.filter((s) => s.durum === 'dogru' || (s.durum !== 'bos' && s.dogruMu)).length;
+    const testB = testQ.filter((s) => s.durum === 'bos' || (!s.durum && (s.ogrenciCevabi === 'Boş' || s.isaretlenenSik === 'Boş' || !s.ogrenciCevabi))).length;
     const testY = Math.max(0, testQ.length - testD - testB);
     const toplamNet = Number(Math.max(0, testD - testY * 0.25).toFixed(2));
 
@@ -239,10 +274,13 @@ export const ExamAnalysisTab: React.FC<ExamAnalysisTabProps> = ({
     sorular.forEach((s) => {
       const current = lessonMap.get(s.ders) || { dogru: 0, yanlis: 0, bos: 0, testDogru: 0, testYanlis: 0 };
       const isTest = !s.soruTuru || s.soruTuru === 'coktan_secmeli';
-      if (s.dogruMu) {
+      const isD = s.durum === 'dogru' || (s.durum !== 'bos' && s.dogruMu);
+      const isB = s.durum === 'bos' || (!s.durum && (s.ogrenciCevabi === 'Boş' || s.isaretlenenSik === 'Boş' || !s.ogrenciCevabi));
+
+      if (isD) {
         current.dogru += 1;
         if (isTest) current.testDogru += 1;
-      } else if (s.ogrenciCevabi === 'Boş') {
+      } else if (isB) {
         current.bos += 1;
       } else {
         current.yanlis += 1;
@@ -276,12 +314,12 @@ export const ExamAnalysisTab: React.FC<ExamAnalysisTabProps> = ({
     onNavigateToHistory();
   };
 
-  const dogruSayisi = sorular.filter((s) => s.dogruMu).length;
-  const bosSayisi = sorular.filter((s) => s.ogrenciCevabi === 'Boş' || !s.ogrenciCevabi).length;
+  const dogruSayisi = sorular.filter((s) => s.durum === 'dogru' || (s.durum !== 'bos' && s.dogruMu)).length;
+  const bosSayisi = sorular.filter((s) => s.durum === 'bos' || (!s.dogruMu && (s.ogrenciCevabi === 'Boş' || s.isaretlenenSik === 'Boş' || !s.ogrenciCevabi))).length;
   const yanlisSayisi = Math.max(0, sorular.length - dogruSayisi - bosSayisi);
   const testQCurrent = sorular.filter((s) => !s.soruTuru || s.soruTuru === 'coktan_secmeli');
-  const testDCurrent = testQCurrent.filter((s) => s.dogruMu).length;
-  const testBCurrent = testQCurrent.filter((s) => s.ogrenciCevabi === 'Boş' || !s.ogrenciCevabi).length;
+  const testDCurrent = testQCurrent.filter((s) => s.durum === 'dogru' || (s.durum !== 'bos' && s.dogruMu)).length;
+  const testBCurrent = testQCurrent.filter((s) => s.durum === 'bos' || (!s.durum && (s.ogrenciCevabi === 'Boş' || s.isaretlenenSik === 'Boş' || !s.ogrenciCevabi))).length;
   const testYCurrent = Math.max(0, testQCurrent.length - testDCurrent - testBCurrent);
   const currentNet = Number(Math.max(0, testDCurrent - testYCurrent * 0.25).toFixed(2));
 
@@ -399,13 +437,17 @@ export const ExamAnalysisTab: React.FC<ExamAnalysisTabProps> = ({
             </div>
 
             <div className="flex items-center gap-3 flex-wrap">
-              <div className="px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-xs font-bold text-slate-700">
-                Net: <strong className="text-indigo-700 text-sm">{currentNet}</strong> ({dogruSayisi} D / {yanlisSayisi} Y)
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-xs font-bold text-slate-700">
+                <span>Net: <strong className="text-indigo-700 text-sm">{currentNet}</strong></span>
+                <span className="text-slate-300">•</span>
+                <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[11px] font-black">{dogruSayisi} D</span>
+                <span className="px-1.5 py-0.5 rounded bg-rose-100 text-rose-800 text-[11px] font-black">{yanlisSayisi} Y</span>
+                <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[11px] font-black">{bosSayisi} B</span>
               </div>
 
               <button
                 onClick={handleFinishAndSaveExam}
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-xs transition-all active:scale-95"
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-xs transition-all active:scale-95 cursor-pointer"
               >
                 <Save className="w-4 h-4" />
                 <span>🏁 Sınavı Bitir ve Kaydet</span>
@@ -556,61 +598,97 @@ export const ExamAnalysisTab: React.FC<ExamAnalysisTabProps> = ({
                   Tespit Edilen Sorular ({sorular.length} Soru)
                 </h4>
                 <span className="text-[11px] text-slate-400">
-                  Doğru/Yanlış durumunu değiştirmek için ikona tıklayın
+                  Doğru (D), Yanlış (Y) veya Boş (B) durumunu doğrudan seçebilirsiniz
                 </span>
               </div>
 
               {/* Questions Scrollable Table/Cards */}
               <div className="space-y-2.5 max-h-[460px] overflow-y-auto pr-1">
                 {sorular.length > 0 ? (
-                  sorular.map((s, idx) => (
-                    <div
-                      key={idx}
-                      className={`p-3.5 rounded-2xl border transition-all text-xs space-y-2 ${
-                        s.dogruMu
-                          ? 'bg-emerald-50/40 border-emerald-200/80'
-                          : s.ogrenciCevabi === 'Boş'
-                          ? 'bg-slate-50 border-slate-200'
-                          : 'bg-rose-50/40 border-rose-200/80'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="w-6 h-6 rounded-lg bg-slate-900 text-white font-black text-xs flex items-center justify-center">
-                            {s.soruNo}
-                          </span>
-                          <span className="font-bold text-slate-900">{s.ders}</span>
-                          <span className="text-slate-400">•</span>
-                          <span className="font-semibold text-slate-700">{s.konu}</span>
-                          {s.kazanimKodu && (
-                            <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-white text-indigo-700 border border-slate-200">
-                              {s.kazanimKodu}
+                  sorular.map((s, idx) => {
+                    const isDogru = s.durum === 'dogru' || (s.durum !== 'bos' && s.dogruMu);
+                    const isBlank = s.durum === 'bos' || (!s.dogruMu && (s.ogrenciCevabi === 'Boş' || s.isaretlenenSik === 'Boş' || !s.ogrenciCevabi));
+                    const isYanlis = !isDogru && !isBlank;
+
+                    return (
+                      <div
+                        key={idx}
+                        className={`p-3.5 rounded-2xl border transition-all text-xs space-y-2 ${
+                          isDogru
+                            ? 'bg-emerald-50/40 border-emerald-200/80'
+                            : isBlank
+                            ? 'bg-slate-50 border-slate-200'
+                            : 'bg-rose-50/40 border-rose-200/80'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="w-6 h-6 rounded-lg bg-slate-900 text-white font-black text-xs flex items-center justify-center">
+                              {s.soruNo}
                             </span>
-                          )}
-                        </div>
-
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => handleToggleQuestionStatus(idx)}
-                            className="p-1 rounded-lg hover:bg-white transition-colors"
-                            title="Doğru/Yanlış Değiştir"
-                          >
-                            {s.dogruMu ? (
-                              <CheckCircle2 className="w-5 h-5 text-emerald-600" />
-                            ) : (
-                              <XCircle className="w-5 h-5 text-rose-600" />
+                            <span className="font-bold text-slate-900">{s.ders}</span>
+                            <span className="text-slate-400">•</span>
+                            <span className="font-semibold text-slate-700">{s.konu}</span>
+                            {s.kazanimKodu && (
+                              <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-white text-indigo-700 border border-slate-200">
+                                {s.kazanimKodu}
+                              </span>
                             )}
-                          </button>
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-black ${
+                              isDogru
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : isBlank
+                                ? 'bg-amber-100 text-amber-800'
+                                : 'bg-rose-100 text-rose-800'
+                            }`}>
+                              {isDogru ? 'DOĞRU' : isBlank ? 'BOŞ' : 'YANLIŞ'}
+                            </span>
+                          </div>
 
-                          <button
-                            onClick={() => handleDeleteQuestion(idx)}
-                            className="text-slate-300 hover:text-rose-600 p-1 rounded transition-colors"
-                            title="Soruyu Sil"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                          <div className="flex items-center gap-2">
+                            {/* D / Y / B Status Selector */}
+                            <div className="flex items-center gap-1 bg-white p-0.5 rounded-xl border border-slate-200 text-xs shadow-2xs">
+                              <button
+                                type="button"
+                                title="Doğru olarak işaretle"
+                                onClick={() => handleUpdateQuestionStatus(idx, 'dogru')}
+                                className={`px-2 py-0.5 rounded-lg font-bold transition-all cursor-pointer ${
+                                  isDogru ? 'bg-emerald-600 text-white shadow-2xs' : 'text-slate-500 hover:text-emerald-700'
+                                }`}
+                              >
+                                D
+                              </button>
+                              <button
+                                type="button"
+                                title="Yanlış olarak işaretle"
+                                onClick={() => handleUpdateQuestionStatus(idx, 'yanlis')}
+                                className={`px-2 py-0.5 rounded-lg font-bold transition-all cursor-pointer ${
+                                  isYanlis ? 'bg-rose-600 text-white shadow-2xs' : 'text-slate-500 hover:text-rose-700'
+                                }`}
+                              >
+                                Y
+                              </button>
+                              <button
+                                type="button"
+                                title="Boş olarak işaretle"
+                                onClick={() => handleUpdateQuestionStatus(idx, 'bos')}
+                                className={`px-2 py-0.5 rounded-lg font-bold transition-all cursor-pointer ${
+                                  isBlank ? 'bg-amber-600 text-white shadow-2xs' : 'text-slate-500 hover:text-amber-700'
+                                }`}
+                              >
+                                B
+                              </button>
+                            </div>
+
+                            <button
+                              onClick={() => handleDeleteQuestion(idx)}
+                              className="text-slate-300 hover:text-rose-600 p-1 rounded transition-colors cursor-pointer"
+                              title="Soruyu Sil"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         </div>
-                      </div>
 
                       {/* Options & Analysis */}
                       <div className="flex items-center justify-between text-[11px] pt-1 border-t border-slate-200/40">
@@ -649,7 +727,8 @@ export const ExamAnalysisTab: React.FC<ExamAnalysisTabProps> = ({
                         onSaveSolution={(newSol) => handleUpdateSolution(idx, newSol)}
                       />
                     </div>
-                  ))
+                  );
+                })
                 ) : (
                   <div className="py-16 text-center text-slate-400 space-y-2">
                     <HelpCircle className="w-8 h-8 text-slate-300 mx-auto" />

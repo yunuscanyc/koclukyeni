@@ -3563,6 +3563,85 @@ Lütfen YALNIZCA geçerli bir JSON nesnesi {"kazanimlar": [...]} döndür. Markd
 // 2. FOTOĞRAFLI SINAV VE OPTİK / MEB KAZANIM ANALİZİ (GEMINI VISION)
 // =========================================================================
 
+// Robust JSON extraction helper handling markdown fences, unescaped LaTeX backslashes, trailing commas, etc.
+function robustParseQuestionsJson(rawText: string): any[] {
+  let cleanText = (rawText || "").trim();
+  if (cleanText.includes("```json")) {
+    cleanText = cleanText.split("```json")[1].split("```")[0].trim();
+  } else if (cleanText.includes("```")) {
+    cleanText = cleanText.split("```")[1].split("```")[0].trim();
+  }
+
+  // 1. Direct parse attempt
+  try {
+    const ilkArr = cleanText.indexOf("[");
+    const sonArr = cleanText.lastIndexOf("]");
+    if (ilkArr >= 0 && sonArr > ilkArr) {
+      const arrStr = cleanText.substring(ilkArr, sonArr + 1);
+      const parsed = JSON.parse(arrStr);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    } else {
+      const parsed = JSON.parse(cleanText);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      if (parsed && typeof parsed === "object") {
+        const inner = parsed.sorular || parsed.questions || parsed.items || parsed.data;
+        if (Array.isArray(inner) && inner.length > 0) return inner;
+      }
+    }
+  } catch {
+    // Continue to repair
+  }
+
+  // 2. Repair unescaped LaTeX backslashes and trailing commas
+  try {
+    const repaired = cleanText
+      .replace(/\\(?!["\\/bfnrtu])/g, "\\\\")
+      .replace(/,\s*([}\]])/g, "$1");
+
+    const ilkArr = repaired.indexOf("[");
+    const sonArr = repaired.lastIndexOf("]");
+    if (ilkArr >= 0 && sonArr > ilkArr) {
+      const arrStr = repaired.substring(ilkArr, sonArr + 1);
+      const parsed = JSON.parse(arrStr);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    } else {
+      const parsed = JSON.parse(repaired);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      if (parsed && typeof parsed === "object") {
+        const inner = parsed.sorular || parsed.questions || parsed.items || parsed.data;
+        if (Array.isArray(inner) && inner.length > 0) return inner;
+      }
+    }
+  } catch {
+    // Continue to regex scanning
+  }
+
+  // 3. Fallback: Extract individual question objects using regex matcher
+  try {
+    const questions: any[] = [];
+    const objRegex = /\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/g;
+    let match;
+    while ((match = objRegex.exec(cleanText)) !== null) {
+      try {
+        const candidate = match[0]
+          .replace(/\\(?!["\\/bfnrtu])/g, "\\\\")
+          .replace(/,\s*([}\]])/g, "$1");
+        const parsedObj = JSON.parse(candidate);
+        if (parsedObj && (parsedObj.soruNo !== undefined || parsedObj.ders || parsedObj.dogruCevap || parsedObj.cozumDetayi)) {
+          questions.push(parsedObj);
+        }
+      } catch {
+        // ignore malformed snippet
+      }
+    }
+    if (questions.length > 0) return questions;
+  } catch {
+    // Parsing fully failed
+  }
+
+  return [];
+}
+
 // Standart Soru Normalizasyonu ve Pedagojik Doğrulama Yardımcısı
 function normalizeAndValidateQuestion(
   q: any,
@@ -3581,10 +3660,21 @@ function normalizeAndValidateQuestion(
     soruTuru = "dogru_yanlis";
   }
 
-  // Extract student choice / marking across separate fields without falsy fallback bugs
+  const rawDurum = String(q.durum || "").toLowerCase();
   const rawStudentAns = q.ogrenciCevabi !== undefined && q.ogrenciCevabi !== null ? String(q.ogrenciCevabi).trim() : (q.studentAnswer ? String(q.studentAnswer).trim() : "");
   const rawMark = q.isaretlenenSik !== undefined && q.isaretlenenSik !== null ? String(q.isaretlenenSik).trim() : (q.secenek ? String(q.secenek).trim() : "");
-  const rawCorrectAnswer = String(q.dogruCevap || q.correctAnswer || q.cevap || "").trim();
+  let rawCorrectAnswer = String(q.dogruCevap || q.correctAnswer || q.cevap || "").trim();
+
+  // Extract solution choice from cozumDetayi if available
+  let cozumOpt: string | null = null;
+  const cozumStr = String(q.cozumDetayi || q.cozum || "");
+  if (cozumStr) {
+    const cozumMatch = cozumStr.match(/(?:doğru\s*)?(?:cevap|seçenek)\s*:?\s*\*?\*?\s*([A-E])\b/i) ||
+                       cozumStr.match(/\b([A-E])\s*(?:seçeneğidir|şıkkıdır)/i);
+    if (cozumMatch) {
+      cozumOpt = cozumMatch[1].toUpperCase();
+    }
+  }
 
   const isBlankValue = (v: string) => {
     if (!v) return true;
@@ -3592,18 +3682,25 @@ function normalizeAndValidateQuestion(
     return clean === "-" || clean === "boş" || clean === "bos" || clean === "unanswered" || clean === "yok" || clean === "null" || clean === "undefined";
   };
 
+  const isExplicitBlank = rawDurum === "bos" || rawDurum === "boş" || rawStudentAns === "Boş" || rawMark === "Boş";
+  const studentAnsIsBlank = isBlankValue(rawStudentAns);
+  const markIsBlank = isBlankValue(rawMark);
+
   let isBlank = false;
   let isaretlenenSik = "";
   let ogrenciCevabi = "";
   let dogruCevap = rawCorrectAnswer || "A";
 
-  const studentAnsIsBlank = isBlankValue(rawStudentAns);
-  const markIsBlank = isBlankValue(rawMark);
-
-  if (studentAnsIsBlank && markIsBlank) {
+  if (isExplicitBlank || (studentAnsIsBlank && markIsBlank)) {
     isBlank = true;
     isaretlenenSik = "Boş";
     ogrenciCevabi = "Boş";
+    if (cozumOpt) {
+      dogruCevap = cozumOpt;
+    } else if (rawCorrectAnswer) {
+      const correctOptMatch = rawCorrectAnswer.match(/^[A-E]$/i) || rawCorrectAnswer.match(/^(?:seçenek|şık)?\s*([A-E])\b/i);
+      dogruCevap = correctOptMatch ? (correctOptMatch[1] || correctOptMatch[0]).toUpperCase() : rawCorrectAnswer;
+    }
   } else {
     // At least one field has actual student answer or mark
     const effectiveAnswer = !studentAnsIsBlank ? rawStudentAns : rawMark;
@@ -3613,11 +3710,19 @@ function normalizeAndValidateQuestion(
     const optMatch = effectiveMark.match(/^[A-E]$/i) || effectiveMark.match(/^(?:seçenek|şık)?\s*([A-E])\b/i) || effectiveAnswer.match(/^[A-E]$/i);
     const correctOptMatch = rawCorrectAnswer.match(/^[A-E]$/i) || rawCorrectAnswer.match(/^(?:seçenek|şık)?\s*([A-E])\b/i);
 
-    if (optMatch && (soruTuru === "coktan_secmeli" || correctOptMatch)) {
+    if (optMatch && (soruTuru === "coktan_secmeli" || correctOptMatch || cozumOpt)) {
       soruTuru = "coktan_secmeli";
       isaretlenenSik = (optMatch[1] || optMatch[0]).toUpperCase();
       ogrenciCevabi = isaretlenenSik;
-      dogruCevap = correctOptMatch ? (correctOptMatch[1] || correctOptMatch[0]).toUpperCase() : (rawCorrectAnswer || "A");
+      
+      // Prefer option from cozumOpt if cozumOpt exists, otherwise correctOptMatch or rawCorrectAnswer
+      if (cozumOpt) {
+        dogruCevap = cozumOpt;
+      } else if (correctOptMatch) {
+        dogruCevap = (correctOptMatch[1] || correctOptMatch[0]).toUpperCase();
+      } else {
+        dogruCevap = (rawCorrectAnswer || "A").toUpperCase();
+      }
       isBlank = false;
     } else {
       // Numerical / Open ended / text answer (e.g. 12, Fotosentez, etc.)
@@ -3629,13 +3734,31 @@ function normalizeAndValidateQuestion(
     }
   }
 
-  // Doğruluk hesabı
+  // Cross-validation: If AI marked q.dogruMu = true or analizNotu indicates student solved it correctly
+  const aiSaidCorrect = q.dogruMu === true || rawDurum === "dogru" || (typeof q.analizNotu === "string" && q.analizNotu.toLowerCase().includes("doğru") && !q.analizNotu.toLowerCase().includes("doğru cevap"));
+  if (soruTuru === "coktan_secmeli" && !isBlank && aiSaidCorrect && isaretlenenSik !== "Boş" && isaretlenenSik !== "-") {
+    // If student marked an option and AI says student is correct, then student marked choice should match correct choice
+    if (isaretlenenSik !== dogruCevap) {
+      if (cozumOpt) {
+        dogruCevap = cozumOpt;
+        isaretlenenSik = cozumOpt;
+        ogrenciCevabi = cozumOpt;
+      } else {
+        isaretlenenSik = dogruCevap;
+        ogrenciCevabi = dogruCevap;
+      }
+    }
+  }
+
+  // Doğruluk hesabı - Absolute single source of truth for multiple choice
   let dogruMu = false;
   if (!isBlank) {
-    if (q.dogruMu !== undefined && typeof q.dogruMu === "boolean") {
+    if (soruTuru === "coktan_secmeli" && isaretlenenSik !== "-" && isaretlenenSik !== "Boş") {
+      dogruMu = (isaretlenenSik.toUpperCase() === dogruCevap.toUpperCase());
+    } else if (q.dogruMu !== undefined && typeof q.dogruMu === "boolean") {
       dogruMu = q.dogruMu;
-    } else if (soruTuru === "coktan_secmeli" && isaretlenenSik !== "-") {
-      dogruMu = isaretlenenSik.toUpperCase() === dogruCevap.toUpperCase();
+    } else if (rawDurum === "dogru") {
+      dogruMu = true;
     } else {
       const normStudent = ogrenciCevabi.toLowerCase().replace(/[^a-z0-9ğüşıöç]/g, "");
       const normCorrect = dogruCevap.toLowerCase().replace(/[^a-z0-9ğüşıöç]/g, "");
@@ -3648,6 +3771,8 @@ function normalizeAndValidateQuestion(
   } else {
     dogruMu = false;
   }
+
+  const durum: "dogru" | "yanlis" | "bos" = isBlank ? "bos" : (dogruMu ? "dogru" : "yanlis");
 
   // Analiz notu
   let analizNotu = q.analizNotu || "";
@@ -3768,42 +3893,36 @@ GÖREV:
 Sana verilen bu test / sınav sayfası görselindeki (${sinavTuru}) BASILI GERÇEK SORULARI tek tek tespit et ve uzman bir öğretmen gibi pedagojik ve matematiksel olarak çöz.
 
 ÖNEMLİ KURALLAR:
-1. Fiziksel Sayfa Tespiti: Fotoğrafta BASILI OLARAK GÖRÜNEN GERÇEK SORULARI tespit et. Görünmeyen soru uydurma!
-2. YARIM, KESİK VE YAN SAYFADAN TAŞAN SORULARI GÖZARDI ET (KESİNLİKLE ALMA):
-   - Fotoğrafın kenarlarında (sağ, sol, alt veya üst kenarında) yarısı kadraja girmiş, bir kısmı kesilmiş, metni eksik veya yan sayfadan taşmış soruları KESİNLİKLE LİSTEYE ALMA, GÖZARDI ET!
-   - Sadece bu sayfada tam, bütün ve eksiksiz olarak basılı bulunan, tüm metni ve şıkları net okunabilen soruları çöz.
-3. Soru Numarası: Fotoğrafta basılı olan orijinal soru numarasını oku (örn: 20).
+1. SAYFADA ÖĞRENCİNİN ÇÖZDÜĞÜ / İŞARETLEDİĞİ TÜM SORULARI MUTLAKA AL (KESİNLİKLE ATLAMA):
+   - Öğrencinin üzerine işaretleme yaptığı, kurşun/tükenmez/kırmızı/mavi kalemle tik (✓) koyduğu, daire içine aldığı, şıkkı karaladığı, altını çizdiği veya el yazısıyla işlem yaptığı TÜM SORULARI MUTLAKA ÇIKAR VE ÇÖZ!
+   - Öğrencinin çözdüğü veya sayfada basılı olan hiçbir ana soruyu 'kenarda', 'kısmen görünüyor' veya 'çözülmemiş' diyerek ASLA ATLAMAYIN, LİSTEDEN ÇIKARMAYIN!
+   - Sayfada çözülmüş soru varsa, o soruları öncelikle tespit et ve eksiksiz olarak listele.
+2. Soru Numarası: Fotoğrafta basılı olan orijinal soru numarasını oku (örn: 20).
 3. Soru Türü (soruTuru): 
    - "coktan_secmeli": A, B, C, D, E gibi seçenekleri olan sorular.
    - "bosluk_doldurma": Cümle veya tablo içindeki boşlukları doldurma soruları (şık harfleri yoktur).
    - "acik_uclu": Öğrencinin serbest işlem veya metin yazdığı açık uçlu sorular.
    - "dogru_yanlis": D / Y şeklinde ifade edilen sorular.
 4. Ders: Tam ders adı (Örn: "Matematik (AYT)", "Matematik (TYT)", "Fizik (AYT)", "Kimya (AYT)", "Biyoloji (AYT)", "Türkçe (TYT)", "Tarih", "Coğrafya", "Geometri").
-5. Ünite: Sorunun ait olduğu MEB ana ünitesi (Örn: "Trigonometri", "Fonksiyonlar", "Türev", "Hücre Biyolojisi", "Kuvvet ve Hareket", "Madde ve Özellikleri").
+5. Ünite: Sorunun ait olduğu MEB ana ünitesi.
 6. Konu: Sorunun alt konu başlığı.
 7. MEB Kazanım Kodu ve Açıklaması:
    - "kazanimKodu": Gerçek MEB kazanım kodu (Örn: "MAT.10.1.2", "FIZ.11.2.1", "KIM.10.3.1", "BIY.11.1.4").
    - "kazanimAciklama": Sorunun ölçtüğü tam MEB kazanım açıklaması.
-8. Çözüm Detayı (cozumDetayi): Sorunun tam, adım adım matematiksel/mantıksal çözümü (LaTeX $...$ kullanarak).
-9. ŞIKLI SORULARDA İŞARETLENEN ŞIK:
-   - Öğrencinin kurşun/tükenmez kalemle daire içine aldığı, boyadığı, yanına tik koyduğu veya yazdığı şıkkı ("A", "B", "C", "D", "E") 'isaretlenenSik' ve 'ogrenciCevabi' olarak oku.
-   - Sadece sayfada gerçekten hiçbir işaretleme/seçim yoksa: isaretlenenSik: "Boş", ogrenciCevabi: "Boş", dogruMu: false.
-10. BOŞLUK DOLDURMA, AÇIK UÇLU VE SAYISAL SORULARDA EL YAZISI TESPİTİ:
-    - Soru şıklı değilse veya öğrenci soru alanına el yazısıyla işlem/çözüm yapmışsa soruTuru: "acik_uclu" veya "bosluk_doldurma" olarak belirle.
-    - EL YAZISI VE SONUÇ: Sorunun altına, çözüm kutusuna, kenar boşluğuna veya soru metninin yanına öğrencinin kurşun/tükenmez kalemle yazdığı işlemleri, ulaştığı nihai sayıyı, daire/kutu içine aldığı sonucu veya kelimeyi (Örn: "12", "x=12", "Fotosentez", "42", "4/3") DİKKATLE OKU ve 'ogrenciCevabi' alanına yaz!
-    - Sayfada öğrencinin el yazısıyla yazdığı bir sayı/cevap varken ASLA "Boş" yazma!
-    - Yalnızca soru alanında ve kenarlarında öğrenciye ait HİÇBİR el yazısı veya işlem bulunmuyorsa ogrenciCevabi: "Boş" yaz.
-    - dogruCevap: Sorunun doğru çözümü/sonucu (Örn: "12", "Fotosentez").
-    - isaretlenenSik: "-".
-11. Doğruluk (dogruMu):
-    - Eğer öğrenci soruyu boş bırakmışsa false.
-    - Öğrencinin cevabı doğruysa true, yanlışsa false.
-12. Analiz Notu: Duruma dair kısa pedagojik açıklama.
-13. Soru Kırpma Alanı / Bounding Box (kutu):
+8. Çözüm Detayı (cozumDetayi): Sorunun tam, adım adım matematiksel/mantıksal çözümü (LaTeX formüllerini JSON içinde geçerli olması için gerekirse çift ters çizgi \\\\ ile yaz).
+9. ŞIKLI SORULARDA İŞARETLENEN ŞIK VE DURUM:
+   - Öğrencinin kurşun/tükenmez/kırmızı/mavi kalemle daire içine aldığı, boyadığı, yanına tik (✓) koyduğu veya yazdığı şıkkı ("A", "B", "C", "D", "E") 'isaretlenenSik' ve 'ogrenciCevabi' olarak oku.
+   - ÖĞRENCİ SORUYU ÇÖZMEMİŞ / BOŞ BIRAKMIŞSA:
+     "isaretlenenSik": "Boş", "ogrenciCevabi": "Boş", "durum": "bos", "dogruMu": false
+   - ÖĞRENCİ DOĞRU ŞIKKI İŞARETLEMEMİŞ VE DOĞRU ÇÖZMÜŞSE:
+     "isaretlenenSik": doğru şık, "ogrenciCevabi": doğru şık, "durum": "dogru", "dogruMu": true
+   - ÖĞRENCİ YANLIŞ ŞIKKI İŞARETLEMEMİŞSE:
+     "isaretlenenSik": işaretlenen yanlış şık, "ogrenciCevabi": işaretlenen yanlış şık, "durum": "yanlis", "dogruMu": false
+   - ÖNEMLİ: Boş bırakılan soruları KESİNLİKLE 'yanlis' yapmayın, 'durum': 'bos' olarak belirtin! Boş sorular netten düşülmez, yanlışlar netten düşülür.
+10. ÇÖZÜM İLE DOĞRU CEVAP BÜTÜNLÜĞÜ:
+    - 'cozumDetayi' metninde ulaşılan nihai cevap hangi şıksa (örn: "Cevap: E"), 'dogruCevap' alanı da %100 BİREBİR O HARF ("E") olmalıdır.
+11. Soru Kırpma Alanı / Bounding Box (kutu):
     - Sorunun sayfadaki tam sınırları: [ymin, xmin, ymax, xmax] (0-1000 standardında tam sayı koordinatlar).
-    - ÜST SINIR (ymin): Soru numarasının başladığı yer (asla önceki sorunun C, D, E şıklarını dahil etme!).
-    - ALT SINIR (ymax): Sorunun EN SON şıkkının (E şıkkı) bittiği yer (şıkları asla yarıda kesme, alttaki sonraki soruya taşma!).
-    - SÜTUN DUVARI (xmin, xmax): Sol sütundaki soru sağ sütuna taşmaz; sağ sütundaki soru sol sütuna taşmaz.
 
 Yanıt formatı SADECE geçerli bir JSON dizisi olmalıdır:
 [
@@ -3811,7 +3930,7 @@ Yanıt formatı SADECE geçerli bir JSON dizisi olmalıdır:
     "soruNo": 1,
     "kutu": [45, 25, 450, 485],
     "soruTuru": "coktan_secmeli",
-    "ders": "Matematik (TYT)",
+    "ders": "${sinavTuru === 'AYT' ? 'Matematik (AYT)' : 'Matematik (TYT)'}",
     "unite": "Fonksiyonlar",
     "konu": "Bileşke Fonksiyon",
     "kazanimKodu": "MAT.10.2.1",
@@ -3819,6 +3938,7 @@ Yanıt formatı SADECE geçerli bir JSON dizisi olmalıdır:
     "isaretlenenSik": "C",
     "ogrenciCevabi": "C",
     "dogruCevap": "C",
+    "durum": "dogru",
     "dogruMu": true,
     "cozumDetayi": "Adım adım soru çözümü...",
     "analizNotu": "Öğrenci soruyu doğru çözmüştür."
@@ -3826,18 +3946,19 @@ Yanıt formatı SADECE geçerli bir JSON dizisi olmalıdır:
   {
     "soruNo": 2,
     "kutu": [45, 510, 480, 970],
-    "soruTuru": "acik_uclu",
-    "ders": "Fizik (AYT)",
+    "soruTuru": "coktan_secmeli",
+    "ders": "${sinavTuru === 'AYT' ? 'Fizik (AYT)' : 'Fizik (TYT)'}",
     "unite": "Kuvvet ve Hareket",
     "konu": "Sabit İvmeli Hareket",
     "kazanimKodu": "FIZ.11.1.2",
     "kazanimAciklama": "Bir boyutta sabit ivmeli hareket denklemlerini kullanarak problemleri çözer.",
-    "isaretlenenSik": "-",
-    "ogrenciCevabi": "12",
-    "dogruCevap": "12",
-    "dogruMu": true,
-    "cozumDetayi": "x = v0*t + 1/2*a*t^2 formülünden x = 12 metre bulunur.",
-    "analizNotu": "Öğrenci 12 sonucunu doğru bulmuştur."
+    "isaretlenenSik": "Boş",
+    "ogrenciCevabi": "Boş",
+    "dogruCevap": "B",
+    "durum": "bos",
+    "dogruMu": false,
+    "cozumDetayi": "x = v0*t + 1/2*a*t^2 formülünden doğru cevap B seçeneğidir.",
+    "analizNotu": "Öğrenci bu soruyu boş bırakmıştır."
   }
 ]`;
 
@@ -3848,15 +3969,37 @@ Yanıt formatı SADECE geçerli bir JSON dizisi olmalıdır:
       temperature: 0.1,
     });
 
-    let cleanText = rawText.trim();
-    const ilk = cleanText.indexOf("[");
-    const son = cleanText.lastIndexOf("]");
-    if (ilk >= 0 && son > ilk) {
-      cleanText = cleanText.substring(ilk, son + 1);
-    }
+    let validParsed = robustParseQuestionsJson(rawText);
 
-    const parsed = JSON.parse(cleanText);
-    const validParsed = Array.isArray(parsed) ? parsed.slice(0, 15) : [];
+    // Focused retry if first attempt found 0 questions
+    if (validParsed.length === 0) {
+      console.log(`[/api/ai/analyze-exam-photo] İlk denemede soru bulunamadı. Odaklanmış ikinci analiz deneniyor...`);
+      try {
+        const focusedPrompt = `
+DİKKAT: Bu sınav sayfası görselinde (${sinavTuru}) basılı test soruları bulunmaktadır.
+İlk taramada soru bulunamadı olarak algılandı. Sayfayı çok daha dikkatli incele:
+1. Sayfadaki soru numaralarını (1, 2, 3, 4, 5...) ve soru metinlerini bul.
+2. Sayfada öğrencinin kurşun/tükenmez/kırmızı/mavi kalemle yaptığı TİKLER (✓), ÇARPI, ŞIK HARFİNİ DAİRE İÇİNE ALMA veya EL YAZISI ÇÖZÜMLERİ oku.
+3. Öğrenci işaretlemişse 'isaretlenenSik' ve 'ogrenciCevabi' olarak oku.
+4. Hiç işaretlenmemiş sorular için 'isaretlenenSik': "Boş", 'ogrenciCevabi': "Boş", 'durum': "bos", 'dogruMu': false yaz.
+5. Soruları çöz, doğru cevabı 'dogruCevap' alanına yaz.
+6. Yanıt olarak SADECE geçerli bir JSON dizisi [...] döndür.
+`;
+        const retryVision = await executeVisionWithFallback(ai, {
+          prompt: focusedPrompt,
+          mimeType,
+          cleanBase64,
+          temperature: 0.1,
+        });
+        const secondQuestions = robustParseQuestionsJson(retryVision.text);
+        if (secondQuestions.length > 0) {
+          console.log(`[/api/ai/analyze-exam-photo] ✅ İkinci denemede ${secondQuestions.length} soru kurtarıldı!`);
+          validParsed = secondQuestions;
+        }
+      } catch (errRetry) {
+        console.warn(`[/api/ai/analyze-exam-photo] İkinci deneme hatası:`, errRetry);
+      }
+    }
     
     // Sanitize question fields via helper
     const sanitizedQuestions = validParsed.map((q: any, idx: number) => {
@@ -4516,9 +4659,10 @@ Sana verilen bu test / deneme sayfası fotoğrafındaki (Sayfa ${pageIdx + 1}, $
 
 KRİTİK KURALLAR:
 1. SAYFA BAŞLIĞINI OKU (DERS VE TEST TESPİTİ): Sayfanın en üstünde veya üst bölümünde yazan test başlığını ve ders adını oku (Örn: "FEN BİLİMLERİ TESTİ", "FİZİK", "KİMYA", "BİYOLOJİ", "TÜRKÇE", "TÜRK DİLİ VE EDEBİYATI", "MATEMATİK", "GEOMETRİ", "TARİH", "COĞRAFYA", "FELSEFE", "DİN KÜLTÜRÜ"). Her sorunun "ders" alanına sayfadaki GERÇEK DERS ADINI yaz (Örn: "Fizik (AYT)", "Kimya (AYT)", "Biyoloji (AYT)", "Matematik (TYT)", "Türkçe (TYT)", "Tarih", "Geometri"). Sayfada yazan test dersini dikkate al, varsayılan olarak Matematik deme!
-2. YARIM, KESİK VE YAN SAYFADAN TAŞAN SORULARI GÖZARDI ET (KESİNLİKLE ALMA):
-   - Fotoğrafın kenarlarında (sağ, sol, alt veya üst sınırında) yarısı kadraja girmiş, bir kısmı kesilmiş, metni eksik veya karşı/yan sayfadan taşmış soruları KESİNLİKLE LİSTEYE ALMA, GÖZARDI ET!
-   - Yalnızca bu sayfada TAM, BÜTÜN ve EKSİKSİZ olarak basılı bulunan soruları çöz.
+2. SAYFADA ÖĞRENCİNİN ÇÖZDÜĞÜ / İŞARETLEDİĞİ TÜM SORULARI MUTLAKA AL (KESİNLİKLE ATLAMA):
+   - Öğrencinin üzerine işaretleme yaptığı, kurşun/tükenmez/kırmızı/mavi kalemle tik (✓) koyduğu, daire içine aldığı, şıkkı karaladığı, altını çizdiği veya el yazısıyla işlem yaptığı TÜM SORULARI MUTLAKA ÇIKAR VE ÇÖZ!
+   - Öğrencinin çözdüğü veya sayfada basılı olan hiçbir ana soruyu 'kenarda', 'kısmen görünüyor' veya 'çözülmemiş' diyerek ASLA ATLAMAYIN, LİSTEDEN ÇIKARMAYIN!
+   - Sayfada çözülmüş soru varsa, o soruları öncelikle tespit et ve eksiksiz olarak listele.
 3. SAYFADAKİ TÜM TAM SORULARI SIRAYLA SAY VE ÇÖZ: Sayfadaki her bir basılı tam soru numarasını (1, 2, 3, 4...) dikkatle tespit et. Sayfada kaç adet tam basılı soru varsa, JSON dizisinde TAM O KADAR soru objesi döndür!
 4. ÖĞRENCİ ÇÖZMEMİŞ VEYA BOŞ BIRAKMIŞ OLSA BİLE: Öğrencinin sayfadaki soruları çözmemiş veya boş bırakmış olması durumunda DA SAYFADAKİ TÜM BASILI SORULARI ÇIKAR VE ÇÖZ! Öğrencinin işaretlediği şıkkı "Boş" olarak kaydet, doğru cevabı ve detaylı çözümü eksiksiz yaz.
 5. Soru Numarası: Fotoğrafta basılı olan orijinal soru numarasını oku (örn: 20).
@@ -4529,25 +4673,30 @@ KRİTİK KURALLAR:
 10. MEB Kazanım Kodu ve Açıklaması:
    - "kazanimKodu": Gerçek MEB kazanım kodu (Örn: "MAT.10.1.2", "FIZ.11.2.1", "KIM.10.3.1", "BIY.11.1.4").
    - "kazanimAciklama": Sorunun ölçtüğü tam MEB kazanım açıklaması.
-11. Çözüm Detayı (cozumDetayi): Sorunun tam, adım adım matematiksel/mantıksal çözümü (LaTeX $...$ kullanarak).
-12. ŞIKLI SORULARDA İŞARETLENEN ŞIK:
-    - Öğrencinin kurşun/tükenmez kalemle daire içine aldığı, boyadığı, yanına tik koyduğu veya yazdığı şıkkı ("A", "B", "C", "D", "E") 'isaretlenenSik' ve 'ogrenciCevabi' olarak oku.
-    - Sadece sayfada hiçbir işaretleme/seçim yoksa: isaretlenenSik: "Boş", ogrenciCevabi: "Boş", dogruMu: false.
-13. BOŞLUK DOLDURMA, AÇIK UÇLU VE SAYISAL SORULARDA EL YAZISI TESPİTİ:
+11. Çözüm Detayı (cozumDetayi): Sorunun tam, adım adım matematiksel/mantıksal çözümü (LaTeX formüllerini JSON için çift ters çizgi \\\\ ile yaz).
+12. ŞIKLI SORULARDA İŞARETLENEN ŞIK VE DURUM:
+    - Öğrencinin kurşun/tükenmez/kırmızı/mavi kalemle daire içine aldığı, boyadığı, yanına tik (✓) koyduğu veya yazdığı şıkkı ("A", "B", "C", "D", "E") 'isaretlenenSik' ve 'ogrenciCevabi' olarak oku.
+    - ÖĞRENCİ SORUYU ÇÖZMEMİŞ / BOŞ BIRAKMIŞSA:
+      "isaretlenenSik": "Boş", "ogrenciCevabi": "Boş", "durum": "bos", "dogruMu": false
+    - ÖĞRENCİ DOĞRU ŞIKKI İŞARETLEMEMİŞ VE DOĞRU ÇÖZMÜŞSE:
+      "isaretlenenSik": doğru şık, "ogrenciCevabi": doğru şık, "durum": "dogru", "dogruMu": true
+    - ÖĞRENCİ YANLIŞ ŞIKKI İŞARETLEMEMİŞSE:
+      "isaretlenenSik": işaretlenen yanlış şık, "ogrenciCevabi": işaretlenen yanlış şık, "durum": "yanlis", "dogruMu": false
+    - ÖNEMLİ: Boş bırakılan soruları KESİNLİKLE 'yanlis' yapmayın, 'durum': 'bos' olarak belirtin! Boş sorular netten düşülmez, yanlışlar netten düşülür.
+13. ÇÖZÜM İLE DOĞRU CEVAP BÜTÜNLÜĞÜ:
+    - 'cozumDetayi' metninde ulaşılan nihai cevap hangi şıksa (örn: "Cevap: E"), 'dogruCevap' alanı da %100 BİREBİR O HARF ("E") olmalıdır. Çözüm metni ile 'dogruCevap' harfi çelişmesin!
+14. BOŞLUK DOLDURMA, AÇIK UÇLU VE SAYISAL SORULARDA EL YAZISI TESPİTİ:
     - Soru şıklı değilse veya öğrenci soru alanına el yazısıyla işlem/çözüm yapmışsa soruTuru: "acik_uclu" veya "bosluk_doldurma" olarak belirle.
     - EL YAZISI VE SONUÇ: Sorunun altına, çözüm kutusuna, kenar boşluğuna veya soru metninin yanına öğrencinin kurşun/tükenmez kalemle yazdığı işlemleri, ulaştığı nihai sayıyı, daire/kutu içine aldığı sonucu veya kelimeyi (Örn: "12", "x=12", "Fotosentez", "42", "4/3") DİKKATLE OKU ve 'ogrenciCevabi' alanına yaz!
     - Sayfada öğrencinin el yazısıyla yazdığı bir sayı/cevap varken ASLA "Boş" yazma!
     - Yalnızca soru alanında ve kenarlarında öğrenciye ait HİÇBİR el yazısı veya işlem bulunmuyorsa ogrenciCevabi: "Boş" yaz.
     - dogruCevap: Sorunun doğru çözümü/sonucu (Örn: "12", "Fotosentez").
     - isaretlenenSik: "-".
-14. Doğruluk (dogruMu):
-    - Öğrenci cevabı doğruysa true, yanlışsa veya boşsa false.
-15. Analiz Notu: Duruma dair kısa pedagojik açıklama.
-16. Soru Kırpma Alanı / Bounding Box (kutu):
+15. Soru Kırpma Alanı / Bounding Box (kutu):
     - Sorunun sayfadaki tam sınırları: [ymin, xmin, ymax, xmax] (0-1000 standardında koordinatlar).
     - ÜST SINIR (ymin): Soru numarasının başladığı üst kenar.
     - ALT SINIR (ymax): Sorunun EN SON şıkkının (E şıkkı) bittiği alt kenar (şıkları asla yarıda kesme, E şıkkını eksiksiz dahil et!).
-    - YATAY SINIRLAR (xmin, xmax): Sorunun sol marjininden başlar, metnin ve şıkların bittiği sağ kenara kadar uzanır. Sorunun sağ tarafındaki metinleri kesinlikle yarıda kesme (geniş sorular için xmax 800-880 olabilir).
+    - YATAY SINIRLAR (xmin, xmax): Sorunun sol marjininden başlar, metnin ve şıkların bittiği sağ kenara kadar uzanır.
 
 Yanıt formatı SADECE geçerli bir JSON dizisi olmalıdır:
 [
@@ -4555,7 +4704,7 @@ Yanıt formatı SADECE geçerli bir JSON dizisi olmalıdır:
     "soruNo": 1,
     "kutu": [25, 20, 980, 820],
     "soruTuru": "coktan_secmeli",
-    "ders": "Matematik (TYT)",
+    "ders": "${job.sinavTuru === 'AYT' ? 'Matematik (AYT)' : 'Matematik (TYT)'}",
     "unite": "Fonksiyonlar",
     "konu": "Bileşke Fonksiyon",
     "kazanimKodu": "MAT.10.2.1",
@@ -4563,6 +4712,7 @@ Yanıt formatı SADECE geçerli bir JSON dizisi olmalıdır:
     "isaretlenenSik": "C",
     "ogrenciCevabi": "C",
     "dogruCevap": "C",
+    "durum": "dogru",
     "dogruMu": true,
     "cozumDetayi": "f(g(2)) hesabı yapılır: g(2)=3 ise f(3)=7 bulunur.",
     "analizNotu": "Öğrenci soruyu doğru çözmüştür."
@@ -4570,18 +4720,19 @@ Yanıt formatı SADECE geçerli bir JSON dizisi olmalıdır:
   {
     "soruNo": 2,
     "kutu": [55, 500, 520, 960],
-    "soruTuru": "acik_uclu",
-    "ders": "Fizik (AYT)",
+    "soruTuru": "coktan_secmeli",
+    "ders": "${job.sinavTuru === 'AYT' ? 'Fizik (AYT)' : 'Fizik (TYT)'}",
     "unite": "Kuvvet ve Hareket",
     "konu": "Sabit İvmeli Hareket",
     "kazanimKodu": "FIZ.11.1.2",
     "kazanimAciklama": "Bir boyutta sabit ivmeli hareket denklemlerini kullanarak problemleri çözer.",
-    "isaretlenenSik": "-",
-    "ogrenciCevabi": "12",
-    "dogruCevap": "12",
-    "dogruMu": true,
-    "cozumDetayi": "x = v0*t + 1/2*a*t^2 formülünden x = 12 metre bulunur.",
-    "analizNotu": "Öğrenci 12 sonucunu doğru bulmuştur."
+    "isaretlenenSik": "Boş",
+    "ogrenciCevabi": "Boş",
+    "dogruCevap": "B",
+    "durum": "bos",
+    "dogruMu": false,
+    "cozumDetayi": "x = v0*t + 1/2*a*t^2 formülünden doğru cevap B seçeneğidir.",
+    "analizNotu": "Öğrenci bu soruyu boş bırakmıştır."
   }
 ]
 `;
@@ -4593,32 +4744,36 @@ Yanıt formatı SADECE geçerli bir JSON dizisi olmalıdır:
             temperature: 0.1,
           });
 
-          let validPageQuestions: any[] = [];
-          try {
-            let cleanText = rawText.trim();
-            if (cleanText.includes("```json")) {
-              cleanText = cleanText.split("```json")[1].split("```")[0].trim();
-            } else if (cleanText.includes("```")) {
-              cleanText = cleanText.split("```")[1].split("```")[0].trim();
-            }
+          let validPageQuestions = robustParseQuestionsJson(rawText);
 
-            const ilkArr = cleanText.indexOf("[");
-            const sonArr = cleanText.lastIndexOf("]");
-            if (ilkArr >= 0 && sonArr > ilkArr) {
-              const arrStr = cleanText.substring(ilkArr, sonArr + 1);
-              const parsed = JSON.parse(arrStr);
-              if (Array.isArray(parsed)) validPageQuestions = parsed;
-            } else {
-              const parsed = JSON.parse(cleanText);
-              if (Array.isArray(parsed)) {
-                validPageQuestions = parsed;
-              } else if (parsed && typeof parsed === "object") {
-                const innerArr = parsed.sorular || parsed.questions || parsed.items || parsed.data;
-                if (Array.isArray(innerArr)) validPageQuestions = innerArr;
+          // Focused retry if first attempt found 0 questions
+          if (validPageQuestions.length === 0) {
+            console.log(`[AI Background Worker] Sayfa ${pageIdx + 1} için ilk denemede soru bulunamadı. Odaklanmış ikinci analiz deneniyor...`);
+            try {
+              const focusedPrompt = `
+DİKKAT: Bu sınav sayfası fotoğrafında (Sayfa ${pageIdx + 1}, ${job.sinavTuru}) basılı test soruları bulunmaktadır.
+İlk taramada soru bulunamadı olarak algılandı. Sayfayı çok daha dikkatli incele:
+1. Sayfadaki soru numaralarını (1, 2, 3, 4, 5...) ve soru metinlerini bul.
+2. Sayfada öğrencinin kurşun/tükenmez/kırmızı/mavi kalemle yaptığı TİKLER (✓), ÇARPI, ŞIK HARFİNİ DAİRE İÇİNE ALMA veya EL YAZISI ÇÖZÜMLERİ oku.
+3. Öğrenci işaretlemişse 'isaretlenenSik' ve 'ogrenciCevabi' olarak oku.
+4. Hiç işaretlenmemiş sorular için 'isaretlenenSik': "Boş", 'ogrenciCevabi': "Boş", 'durum': "bos", 'dogruMu': false yaz.
+5. Soruları çöz, doğru cevabı 'dogruCevap' alanına yaz.
+6. Yanıt olarak SADECE geçerli bir JSON dizisi [...] döndür.
+`;
+              const retryVision = await executeVisionWithFallback(ai, {
+                prompt: focusedPrompt,
+                mimeType,
+                cleanBase64,
+                temperature: 0.1,
+              });
+              const secondQuestions = robustParseQuestionsJson(retryVision.text);
+              if (secondQuestions.length > 0) {
+                console.log(`[AI Background Worker] ✅ İkinci denemede Sayfa ${pageIdx + 1} için ${secondQuestions.length} soru başarıyla kurtarıldı!`);
+                validPageQuestions = secondQuestions;
               }
+            } catch (errRetry) {
+              console.warn(`[AI Background Worker] İkinci deneme hatası:`, errRetry);
             }
-          } catch (jsonErr) {
-            console.warn(`Sayfa ${pageIdx + 1} JSON ayrıştırma uyarısı:`, jsonErr);
           }
 
           console.log(`[AI Background Worker] Sayfa ${pageIdx + 1}: ${validPageQuestions?.length || 0} adet soru başarıyla analiz edildi (Model: ${usedModel}).`);
@@ -5311,6 +5466,164 @@ app.post("/api/archives/:id/reset-and-solve", async (req, res) => {
     message: `${photos.length} sayfa fotoğrafı muhafaza edildi. Yapay zekâ tüm soruları baştan çözmeye başladı.`,
     archive: transportArchive,
   });
+});
+
+// Single Page Re-Analysis Endpoint: Solves a specific page that was missed or had a placeholder
+app.post("/api/archives/:id/reanalyze-page", async (req, res) => {
+  const { id } = req.params;
+  const pageIndex = typeof req.body.pageIndex === "number" ? req.body.pageIndex : (typeof req.body.sayfaNo === "number" ? req.body.sayfaNo - 1 : 0);
+
+  let archive = memArchives.find((a) => a.id === id);
+  if (!archive && pool && !useMemoryFallback) {
+    try {
+      const dbRes = await pool.query("SELECT * FROM archives WHERE id = $1", [id]);
+      if (dbRes.rows.length > 0) {
+        const fullArch = formatArchiveRow(dbRes.rows[0], true);
+        if (fullArch) {
+          archive = fullArch;
+          const idx = memArchives.findIndex((a) => a.id === id);
+          if (idx >= 0) memArchives[idx] = fullArch;
+          else memArchives.push(fullArch);
+        }
+      }
+    } catch (e) {
+      console.warn("DB fetch error in reanalyze-page:", e);
+    }
+  }
+
+  if (!archive && req.body && req.body.archive) {
+    archive = req.body.archive;
+  }
+
+  if (!archive) {
+    return res.status(404).json({ success: false, message: "Sınav kaydı bulunamadı." });
+  }
+
+  const photos = await getArchiveFullPhotos(id);
+  const imgItem = photos[pageIndex];
+  if (!imgItem) {
+    return res.status(400).json({ success: false, message: `Sayfa ${pageIndex + 1} için kayıtlı fotoğraf bulunamadı.` });
+  }
+
+  const rawBase64 = typeof imgItem === "string" ? imgItem : (imgItem?.imageBase64 || "");
+  const mimeType = typeof imgItem === "object" && imgItem?.mimeType ? imgItem.mimeType : "image/jpeg";
+  const cleanBase64 = rawBase64.replace(/^data:image\/\w+;base64,/, "").trim();
+
+  if (!cleanBase64 || cleanBase64.length < 50) {
+    return res.status(400).json({ success: false, message: `Sayfa ${pageIndex + 1} görsel verisi geçersiz.` });
+  }
+
+  const ai = getGeminiClient();
+  if (!ai) {
+    return res.status(500).json({ success: false, message: "Yapay zekâ istemcisi hazır değil." });
+  }
+
+  const sinavTuru = archive.sinavTuru || "TYT";
+  const prompt = `
+TALİMAT:
+"Bu testteki soruları çöz, soru türünü (çoktan seçmeli, boşluk doldurma, açık uçlu), MEB kazanımlarını, ünitesini ve ders adını ver, çözümlerle kazanımları birleştir."
+
+GÖREV:
+Sana verilen bu test / sınav sayfası görselindeki (${sinavTuru}, Sayfa ${pageIndex + 1}) BASILI GERÇEK SORULARI tek tek tespit et ve uzman bir öğretmen gibi pedagojik ve matematiksel olarak çöz.
+
+ÖNEMLİ KURALLAR:
+1. SAYFADA ÖĞRENCİNİN ÇÖZDÜĞÜ / İŞARETLEDİĞİ TÜM SORULARI MUTLAKA AL (KESİNLİKLE ATLAMA):
+   - Öğrencinin üzerine işaretleme yaptığı, kurşun/tükenmez/kırmızı/mavi kalemle tik (✓) koyduğu, daire içine aldığı, şıkkı karaladığı veya el yazısıyla işlem yaptığı TÜM SORULARI MUTLAKA ÇIKAR VE ÇÖZ!
+   - Sayfadaki basılı ve çözülmüş hiçbir soruyu 'kenarda' veya 'kesik' diyerek atlama.
+2. Soru Numarası: Fotoğrafta basılı olan orijinal soru numarasını oku (örn: 20).
+3. Soru Türü (soruTuru): "coktan_secmeli", "bosluk_doldurma", "acik_uclu", "dogru_yanlis".
+4. Ders: Tam ders adı (Örn: "Matematik (AYT)", "Matematik (TYT)", "Fizik (AYT)", "Kimya (AYT)", "Biyoloji (AYT)", "Türkçe (TYT)", "Tarih", "Geometri").
+5. Ünite: Sorunun ait olduğu MEB ana ünitesi.
+6. Konu: Sorunun alt konu başlığı.
+7. MEB Kazanım Kodu ve Açıklaması: "kazanimKodu", "kazanimAciklama".
+8. Çözüm Detayı (cozumDetayi): Sorunun tam, adım adım çözümü.
+9. ŞIKLI SORULARDA İŞARETLENEN ŞIK VE DURUM:
+   - Öğrencinin işaretlediği şıkkı 'isaretlenenSik' ve 'ogrenciCevabi' olarak oku.
+   - ÖĞRENCİ SORUYU ÇÖZMEMİŞ / BOŞ BIRAKMIŞSA: "isaretlenenSik": "Boş", "ogrenciCevabi": "Boş", "durum": "bos", "dogruMu": false
+   - ÖĞRENCİ DOĞRU ŞIKKI İŞARETLEMEMİŞSE: "durum": "dogru", "dogruMu": true
+   - ÖĞRENCİ YANLIŞ ŞIKKI İŞARETLEMEMİŞSE: "durum": "yanlis", "dogruMu": false
+   - Boş bırakılan soruları KESİNLİKLE 'yanlis' yapmayın, 'durum': 'bos' olarak belirtin.
+10. Doğru Cevap: 'dogruCevap' alanına doğru seçeneği ("A", "B", "C", "D", "E") yaz.
+
+Yanıt formatı SADECE geçerli bir JSON dizisi [...] olmalıdır.
+`;
+
+  try {
+    const { text: rawText } = await executeVisionWithFallback(ai, {
+      prompt,
+      mimeType,
+      cleanBase64,
+      temperature: 0.1,
+    });
+
+    let detectedQuestions = robustParseQuestionsJson(rawText);
+
+    if (detectedQuestions.length === 0) {
+      const retryVision = await executeVisionWithFallback(ai, {
+        prompt: `Bu fotoğrafta (Sayfa ${pageIndex + 1}, ${sinavTuru}) basılı sorular ve öğrenci işaretlemeleri vardır. Her bir soruyu tespit edip çözerek geçerli bir JSON dizisi [...] olarak döndür.`,
+        mimeType,
+        cleanBase64,
+        temperature: 0.1,
+      });
+      detectedQuestions = robustParseQuestionsJson(retryVision.text);
+    }
+
+    if (detectedQuestions.length === 0) {
+      return res.json({
+        success: false,
+        message: `Sayfa ${pageIndex + 1} üzerinde soru veya öğrenci çözümü tespit edilemedi.`,
+      });
+    }
+
+    const allDbCurriculum = await fetchDbCurriculumItems();
+    const matched = matchQuestionsWithDbCurriculum(detectedQuestions.slice(0, 15), allDbCurriculum);
+    await autoSaveQuestionsCurriculum(matched, sinavTuru);
+
+    // Remove old questions/placeholders for this page
+    const existing = (archive.sorular || []).filter((q: any) => {
+      const qPageIdx = q.sayfaIndex !== undefined ? q.sayfaIndex : (q.sayfaNo ? q.sayfaNo - 1 : 0);
+      return qPageIdx !== pageIndex;
+    });
+
+    let soruCounter = existing.length + 1;
+    const defaultDers = sinavTuru === "AYT" ? "AYT Genel" : "TYT Genel";
+    const newNormalized = matched.map((q: any) => {
+      return normalizeAndValidateQuestion(q, pageIndex, soruCounter++, defaultDers);
+    });
+
+    const combinedQuestions = [...existing, ...newNormalized].sort((a: any, b: any) => (a.sayfaIndex ?? a.sayfaNo) - (b.sayfaIndex ?? b.sayfaNo));
+
+    // Recompute totals
+    const realQuestions = combinedQuestions.filter((q: any) => q.unite !== "Çözülmemiş / Boş Sayfa" && q.unite !== "Boş / Çözülmemiş Sayfa" && q.ders !== "Genel");
+    const dCount = realQuestions.filter((q: any) => q.durum === "dogru" || (q.durum !== "bos" && q.dogruMu)).length;
+    const bCount = realQuestions.filter((q: any) => q.durum === "bos" || (!q.dogruMu && (q.isaretlenenSik === "Boş" || q.ogrenciCevabi === "Boş"))).length;
+    const yCount = Math.max(0, realQuestions.length - dCount - bCount);
+
+    const testQ = realQuestions.filter((q: any) => !q.soruTuru || q.soruTuru === 'coktan_secmeli');
+    const testD = testQ.filter((q: any) => q.durum === "dogru" || (q.durum !== "bos" && q.dogruMu)).length;
+    const testB = testQ.filter((q: any) => q.durum === "bos" || (!q.dogruMu && (q.isaretlenenSik === "Boş" || q.ogrenciCevabi === "Boş"))).length;
+    const testY = Math.max(0, testQ.length - testD - testB);
+    const toplamNet = Number(Math.max(0, testD - testY * 0.25).toFixed(2));
+
+    archive.sorular = combinedQuestions;
+    archive.toplamSoru = combinedQuestions.length;
+    archive.dogruSayisi = dCount;
+    archive.yanlisSayisi = yCount;
+    archive.bosSayisi = bCount;
+    archive.toplamNet = toplamNet;
+    archive.net = toplamNet;
+
+    await persistArchiveRecord(archive);
+
+    return res.json({
+      success: true,
+      message: `Sayfa ${pageIndex + 1} başarıyla analiz edildi (${newNormalized.length} soru eklendi).`,
+      archive,
+    });
+  } catch (err: any) {
+    console.error("Sayfa yeniden analiz hatası:", err);
+    return res.status(500).json({ success: false, message: "Sayfa analizi sırasında hata oluştu: " + err.message });
+  }
 });
 
 // =========================================================================

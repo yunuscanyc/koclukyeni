@@ -25,10 +25,11 @@ import {
   Download,
   Plus,
   Users,
-  Filter
+  Filter,
+  AlertCircle
 } from 'lucide-react';
 import { OgrenciSinavKaydi, SinavSorusu, DenemeSinavi, Student, Kazanim } from '../../../types';
-import { retryExamAIAnalysis, markArchiveAsRead, getExamArchiveById, resetAndResolveExamAI, saveExamArchive } from '../../../lib/apiService';
+import { retryExamAIAnalysis, markArchiveAsRead, getExamArchiveById, resetAndResolveExamAI, saveExamArchive, reanalyzeArchivePage } from '../../../lib/apiService';
 import { QuestionSolutionView } from '../QuestionSolutionView';
 import { StudentTestUploadModal } from '../../portal/StudentTestUploadModal';
 import { formatDate } from '../../../utils/dateUtils';
@@ -74,6 +75,7 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
 
   const [isRetrying, setIsRetrying] = useState(false);
   const [retryMessage, setRetryMessage] = useState<string | null>(null);
+  const [reanalyzingPageNo, setReanalyzingPageNo] = useState<number | null>(null);
   const [confirmResetId, setConfirmResetId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [isDownloadingZip, setIsDownloadingZip] = useState(false);
@@ -307,6 +309,33 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
     setPan({ x: 0, y: 0 });
     setRotation(0);
   }, [selectedArchiveId]);
+
+  const handleReanalyzePage = async (arch: OgrenciSinavKaydi, pageNo: number) => {
+    setReanalyzingPageNo(pageNo);
+    setRetryMessage(`Sayfa ${pageNo} yapay zekâ ile yeniden taranıyor...`);
+    try {
+      const res = await reanalyzeArchivePage(arch.id, pageNo - 1, arch);
+      if (res.success && res.archive) {
+        setFullArchiveCache((prev) => ({
+          ...prev,
+          [arch.id]: res.archive!,
+        }));
+        if (onSaveExamArchive) {
+          onSaveExamArchive(res.archive);
+        }
+        setRetryMessage(res.message || `Sayfa ${pageNo} başarıyla analiz edildi.`);
+      } else {
+        setRetryMessage(res.message || 'Sayfada soru tespit edilemedi.');
+      }
+      setTimeout(() => setRetryMessage(null), 4000);
+    } catch (err: any) {
+      console.error('Reanalyze page error:', err);
+      setRetryMessage('Sayfa taranırken hata oluştu: ' + (err?.message || ''));
+      setTimeout(() => setRetryMessage(null), 4000);
+    } finally {
+      setReanalyzingPageNo(null);
+    }
+  };
 
   // Zoom and rotation controls
   const handleZoomIn = () => setZoom((z) => Math.min(z + 0.25, 3));
@@ -1034,10 +1063,19 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
                       <div className="space-y-3">
                         {filteredQuestions.length > 0 ? (
                           filteredQuestions.map((q) => {
-                            const isDogru = q.durum === 'dogru' || (q.durum !== 'bos' && q.dogruMu);
-                            const isBlank = q.durum === 'bos' || (!q.durum && (!q.isaretlenenSik || q.isaretlenenSik === 'Boş' || q.ogrenciCevabi === 'Boş'));
-                            const isYanlis = !isDogru && !isBlank;
                             const isFillInBlank = q.soruTuru === 'bosluk_doldurma' || q.soruTuru === 'acik_uclu';
+                            const hasOptionMatch = Boolean(
+                              !isFillInBlank &&
+                              q.isaretlenenSik &&
+                              q.dogruCevap &&
+                              q.isaretlenenSik !== 'Boş' &&
+                              q.isaretlenenSik !== '-' &&
+                              q.isaretlenenSik.trim().toUpperCase() === q.dogruCevap.trim().toUpperCase()
+                            );
+                            const isDogru = hasOptionMatch || (q.durum === 'dogru' || (q.durum !== 'bos' && q.dogruMu));
+                            const isBlank = !isDogru && (q.durum === 'bos' || (!q.durum && (!q.isaretlenenSik || q.isaretlenenSik === 'Boş' || q.ogrenciCevabi === 'Boş')));
+                            const isYanlis = !isDogru && !isBlank;
+                            const isUnsolvedPlaceholder = q.unite === "Çözülmemiş / Boş Sayfa" || q.unite === "Boş / Çözülmemiş Sayfa" || q.ders === "Genel" || q.konu === "Öğrenci Tarafından Çözülmemiş";
 
                             return (
                               <div
@@ -1050,6 +1088,38 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
                                     : 'bg-rose-50/40 border-rose-200'
                                 }`}
                               >
+                                {isUnsolvedPlaceholder && (
+                                  <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl space-y-2">
+                                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                                      <div className="text-xs font-bold text-amber-900 flex items-center gap-1.5">
+                                        <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                                        <span>Bu sayfa yapay zekâ tarafından boş veya çözülmemiş olarak kaydedilmiş.</span>
+                                      </div>
+                                      <button
+                                        type="button"
+                                        disabled={reanalyzingPageNo === (q.sayfaNo || 1)}
+                                        onClick={() => handleReanalyzePage(fullArch, q.sayfaNo || 1)}
+                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-xs transition-all cursor-pointer disabled:opacity-50"
+                                      >
+                                        {reanalyzingPageNo === (q.sayfaNo || 1) ? (
+                                          <>
+                                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                            <span>Taranıyor...</span>
+                                          </>
+                                        ) : (
+                                          <>
+                                            <Sparkles className="w-3.5 h-3.5" />
+                                            <span>🔍 Sayfa {q.sayfaNo || 1}'i Tekrar Tara & Çöz</span>
+                                          </>
+                                        )}
+                                      </button>
+                                    </div>
+                                    <p className="text-[11px] text-amber-700">
+                                      Öğrenci bu sayfadaki soruları çözmüşse, butona tıklayarak yapay zekanın sadece bu sayfayı yüksek hassasiyetle yeniden okumasını sağlayabilirsiniz.
+                                    </p>
+                                  </div>
+                                )}
+
                                 <div className="flex items-center justify-between gap-2 flex-wrap">
                                   <div className="flex items-center gap-2 flex-wrap">
                                     <span className="w-6 h-6 rounded-lg bg-slate-900 text-white font-black text-xs flex items-center justify-center">
@@ -1161,8 +1231,30 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
                             );
                           })
                         ) : (
-                          <div className="p-8 rounded-2xl bg-slate-50 border border-slate-200 text-center text-slate-400 text-xs">
-                            Bu denemede henüz çözülmüş soru bulunmuyor.
+                          <div className="p-8 rounded-2xl bg-slate-50 border border-slate-200 text-center space-y-3">
+                            <p className="text-slate-500 text-xs font-semibold">
+                              {selectedPageFilter !== 'all' ? `Sayfa ${selectedPageFilter} için henüz çözülmüş soru bulunmuyor.` : 'Bu denemede henüz çözülmüş soru bulunmuyor.'}
+                            </p>
+                            {selectedPageFilter !== 'all' && (
+                              <button
+                                type="button"
+                                disabled={reanalyzingPageNo === selectedPageFilter}
+                                onClick={() => handleReanalyzePage(fullArch, selectedPageFilter as number)}
+                                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-xs transition-all cursor-pointer disabled:opacity-50"
+                              >
+                                {reanalyzingPageNo === selectedPageFilter ? (
+                                  <>
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                    <span>Sayfa {selectedPageFilter} Taranıyor...</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Sparkles className="w-3.5 h-3.5" />
+                                    <span>🔍 Sayfa {selectedPageFilter}'i Yapay Zekâ ile Tara & Çöz</span>
+                                  </>
+                                )}
+                              </button>
+                            )}
                           </div>
                         )}
                       </div>

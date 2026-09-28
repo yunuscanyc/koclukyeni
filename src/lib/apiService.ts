@@ -227,6 +227,13 @@ export async function resetAndResolveExamAI(archiveId: string, archive?: Ogrenci
   });
 }
 
+export async function reanalyzeArchivePage(archiveId: string, pageIndex: number, archive?: OgrenciSinavKaydi): Promise<{ success: boolean; message: string; archive?: OgrenciSinavKaydi }> {
+  return fetchApi<{ success: boolean; message: string; archive?: OgrenciSinavKaydi }>(`/api/archives/${archiveId}/reanalyze-page`, {
+    method: 'POST',
+    body: JSON.stringify({ pageIndex, archive }),
+  });
+}
+
 // AI MONITORING & DIAGNOSTICS
 export async function getAiSystemStatus(): Promise<AiSystemStatus> {
   return fetchApi<AiSystemStatus>('/api/system/status');
