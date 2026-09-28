@@ -3734,23 +3734,7 @@ function normalizeAndValidateQuestion(
     }
   }
 
-  // Cross-validation: If AI marked q.dogruMu = true or analizNotu indicates student solved it correctly
-  const aiSaidCorrect = q.dogruMu === true || rawDurum === "dogru" || (typeof q.analizNotu === "string" && q.analizNotu.toLowerCase().includes("doğru") && !q.analizNotu.toLowerCase().includes("doğru cevap"));
-  if (soruTuru === "coktan_secmeli" && !isBlank && aiSaidCorrect && isaretlenenSik !== "Boş" && isaretlenenSik !== "-") {
-    // If student marked an option and AI says student is correct, then student marked choice should match correct choice
-    if (isaretlenenSik !== dogruCevap) {
-      if (cozumOpt) {
-        dogruCevap = cozumOpt;
-        isaretlenenSik = cozumOpt;
-        ogrenciCevabi = cozumOpt;
-      } else {
-        isaretlenenSik = dogruCevap;
-        ogrenciCevabi = dogruCevap;
-      }
-    }
-  }
-
-  // Doğruluk hesabı - Absolute single source of truth for multiple choice
+  // Doğruluk hesabı - Absolute single source of truth: compare student's detected mark against correct answer
   let dogruMu = false;
   if (!isBlank) {
     if (soruTuru === "coktan_secmeli" && isaretlenenSik !== "-" && isaretlenenSik !== "Boş") {
@@ -3893,10 +3877,10 @@ GÖREV:
 Sana verilen bu test / sınav sayfası görselindeki (${sinavTuru}) BASILI GERÇEK SORULARI tek tek tespit et ve uzman bir öğretmen gibi pedagojik ve matematiksel olarak çöz.
 
 ÖNEMLİ KURALLAR:
-1. SAYFADA ÖĞRENCİNİN ÇÖZDÜĞÜ / İŞARETLEDİĞİ TÜM SORULARI MUTLAKA AL (KESİNLİKLE ATLAMA):
-   - Öğrencinin üzerine işaretleme yaptığı, kurşun/tükenmez/kırmızı/mavi kalemle tik (✓) koyduğu, daire içine aldığı, şıkkı karaladığı, altını çizdiği veya el yazısıyla işlem yaptığı TÜM SORULARI MUTLAKA ÇIKAR VE ÇÖZ!
-   - Öğrencinin çözdüğü veya sayfada basılı olan hiçbir ana soruyu 'kenarda', 'kısmen görünüyor' veya 'çözülmemiş' diyerek ASLA ATLAMAYIN, LİSTEDEN ÇIKARMAYIN!
-   - Sayfada çözülmüş soru varsa, o soruları öncelikle tespit et ve eksiksiz olarak listele.
+1. SAYFADAKİ TÜM BASILI SORULARI ÇIKAR VE ÇÖZ (BOŞ / ÇÖZÜLMEMİŞ SAYFALAR DAHİL):
+   - Sayfada yer alan tüm basılı soru numaralarını (1, 2, 3...) bul ve her basılı soru için eksiksiz bir JSON nesnesi üret.
+   - Öğrencinin üzerine işaretleme yaptığı soruları öncelikle tespit et.
+   - Öğrenci sayfadaki soruları hiç çözmemiş veya boş bırakmış olsa dahi; sayfada basılı tüm soruları tespit et, çöz ve 'isaretlenenSik': "Boş", 'ogrenciCevabi': "Boş", 'durum': "bos", 'dogruMu': false olarak listele!
 2. Soru Numarası: Fotoğrafta basılı olan orijinal soru numarasını oku (örn: 20).
 3. Soru Türü (soruTuru): 
    - "coktan_secmeli": A, B, C, D, E gibi seçenekleri olan sorular.
@@ -3910,15 +3894,23 @@ Sana verilen bu test / sınav sayfası görselindeki (${sinavTuru}) BASILI GERÇ
    - "kazanimKodu": Gerçek MEB kazanım kodu (Örn: "MAT.10.1.2", "FIZ.11.2.1", "KIM.10.3.1", "BIY.11.1.4").
    - "kazanimAciklama": Sorunun ölçtüğü tam MEB kazanım açıklaması.
 8. Çözüm Detayı (cozumDetayi): Sorunun tam, adım adım matematiksel/mantıksal çözümü (LaTeX formüllerini JSON içinde geçerli olması için gerekirse çift ters çizgi \\\\ ile yaz).
-9. ŞIKLI SORULARDA İŞARETLENEN ŞIK VE DURUM:
-   - Öğrencinin kurşun/tükenmez/kırmızı/mavi kalemle daire içine aldığı, boyadığı, yanına tik (✓) koyduğu veya yazdığı şıkkı ("A", "B", "C", "D", "E") 'isaretlenenSik' ve 'ogrenciCevabi' olarak oku.
-   - ÖĞRENCİ SORUYU ÇÖZMEMİŞ / BOŞ BIRAKMIŞSA:
+9. İŞARETLENEN ŞIKKI BULMA VE TESPİT ETME TALİMATI (ÇOK DİKKATLİ İNCELE):
+   - Öğrencinin soru üzerinde işaretlediği şıkkı tespit ederken şu işaretleme türlerini ara:
+     * DAİRE / YUVARLAK İÇİNE ALMA: Öğrenci şık harfini (A, B, C, D veya E) ya da parantezini daire içine almışsa o şıkkı işaretlemiştir.
+     * ŞIK HARFİNİ BOYAMA VEYA KARALAMA: Şık harfinin veya yuvarlağının içi kurşun/tükenmez kalemle doldurulmuş veya karalanmışsa o şık seçilmiştir.
+     * TİK İŞARETİ (✓): Şık harfinin hemen yanına, üstüne veya soluna konulan onay/tik işareti o şıkkın seçildiğini gösterir.
+     * ALTINI ÇİZME: Bir şıkkın metninin veya harfinin altı belirgin çizilmiş ve başka işaretleme yoksa o şık seçilmiştir.
+     * YANINA EL YAZISIYLA YAZMA: Soru kenarına öğrenci açıkça tek bir şık harfi yazmışsa (Örn: "Cevap C" veya sadece "D") o şık seçilmiştir.
+   - ELENEN / ÜSTÜ ÇİZİLEN ŞIKLARA DİKKAT ET (BU ŞIKLARI SEÇİLDİ SANMA):
+     * Öğrenci bir şıkkı elemek için üstüne düz çizgi (—) veya çarpı (X) atmış olabilir. Üstü çizilerek elenen şık işaretlenen şık DEĞİLDİR! Asıl işaretlenen şık; elenmeyen, daire içine alınan, boyanan veya tik atılan şıktır.
+   - ÖĞRENCİ SORUYU ÇÖZMEMİŞ / BOŞ BIRAKMIŞSA (HİÇBİR İŞARETLEME YOKSA):
      "isaretlenenSik": "Boş", "ogrenciCevabi": "Boş", "durum": "bos", "dogruMu": false
-   - ÖĞRENCİ DOĞRU ŞIKKI İŞARETLEMEMİŞ VE DOĞRU ÇÖZMÜŞSE:
-     "isaretlenenSik": doğru şık, "ogrenciCevabi": doğru şık, "durum": "dogru", "dogruMu": true
-   - ÖĞRENCİ YANLIŞ ŞIKKI İŞARETLEMEMİŞSE:
-     "isaretlenenSik": işaretlenen yanlış şık, "ogrenciCevabi": işaretlenen yanlış şık, "durum": "yanlis", "dogruMu": false
-   - ÖNEMLİ: Boş bırakılan soruları KESİNLİKLE 'yanlis' yapmayın, 'durum': 'bos' olarak belirtin! Boş sorular netten düşülmez, yanlışlar netten düşülür.
+   - ÖĞRENCİ DOĞRU ŞIKKI İŞARETLEMİŞSE:
+     "isaretlenenSik": işaretlenen harf, "ogrenciCevabi": işaretlenen harf, "durum": "dogru", "dogruMu": true
+   - ÖĞRENCİ YANLIŞ ŞIKKI İŞARETLEMİŞSE:
+     "isaretlenenSik": işaretlenen yanlış harf, "ogrenciCevabi": işaretlenen yanlış harf, "durum": "yanlis", "dogruMu": false
+   - ASLA doğru cevabı öğrenci işaretlemiş gibi varsayma! Öğrencinin işaretlediği şık (örn: "A") ile sorunun doğru cevabı (örn: "C") farklıysa, 'isaretlenenSik': "A" ve 'dogruCevap': "C" yazılmalıdır.
+   - Boş bırakılan soruları KESİNLİKLE 'yanlis' yapmayın, 'durum': 'bos' olarak belirtin! Boş sorular netten düşülmez, yanlışlar netten düşülür.
 10. ÇÖZÜM İLE DOĞRU CEVAP BÜTÜNLÜĞÜ:
     - 'cozumDetayi' metninde ulaşılan nihai cevap hangi şıksa (örn: "Cevap: E"), 'dogruCevap' alanı da %100 BİREBİR O HARF ("E") olmalıdır.
 11. Soru Kırpma Alanı / Bounding Box (kutu):
@@ -4659,40 +4651,46 @@ Sana verilen bu test / deneme sayfası fotoğrafındaki (Sayfa ${pageIdx + 1}, $
 
 KRİTİK KURALLAR:
 1. SAYFA BAŞLIĞINI OKU (DERS VE TEST TESPİTİ): Sayfanın en üstünde veya üst bölümünde yazan test başlığını ve ders adını oku (Örn: "FEN BİLİMLERİ TESTİ", "FİZİK", "KİMYA", "BİYOLOJİ", "TÜRKÇE", "TÜRK DİLİ VE EDEBİYATI", "MATEMATİK", "GEOMETRİ", "TARİH", "COĞRAFYA", "FELSEFE", "DİN KÜLTÜRÜ"). Her sorunun "ders" alanına sayfadaki GERÇEK DERS ADINI yaz (Örn: "Fizik (AYT)", "Kimya (AYT)", "Biyoloji (AYT)", "Matematik (TYT)", "Türkçe (TYT)", "Tarih", "Geometri"). Sayfada yazan test dersini dikkate al, varsayılan olarak Matematik deme!
-2. SAYFADA ÖĞRENCİNİN ÇÖZDÜĞÜ / İŞARETLEDİĞİ TÜM SORULARI MUTLAKA AL (KESİNLİKLE ATLAMA):
-   - Öğrencinin üzerine işaretleme yaptığı, kurşun/tükenmez/kırmızı/mavi kalemle tik (✓) koyduğu, daire içine aldığı, şıkkı karaladığı, altını çizdiği veya el yazısıyla işlem yaptığı TÜM SORULARI MUTLAKA ÇIKAR VE ÇÖZ!
-   - Öğrencinin çözdüğü veya sayfada basılı olan hiçbir ana soruyu 'kenarda', 'kısmen görünüyor' veya 'çözülmemiş' diyerek ASLA ATLAMAYIN, LİSTEDEN ÇIKARMAYIN!
-   - Sayfada çözülmüş soru varsa, o soruları öncelikle tespit et ve eksiksiz olarak listele.
-3. SAYFADAKİ TÜM TAM SORULARI SIRAYLA SAY VE ÇÖZ: Sayfadaki her bir basılı tam soru numarasını (1, 2, 3, 4...) dikkatle tespit et. Sayfada kaç adet tam basılı soru varsa, JSON dizisinde TAM O KADAR soru objesi döndür!
-4. ÖĞRENCİ ÇÖZMEMİŞ VEYA BOŞ BIRAKMIŞ OLSA BİLE: Öğrencinin sayfadaki soruları çözmemiş veya boş bırakmış olması durumunda DA SAYFADAKİ TÜM BASILI SORULARI ÇIKAR VE ÇÖZ! Öğrencinin işaretlediği şıkkı "Boş" olarak kaydet, doğru cevabı ve detaylı çözümü eksiksiz yaz.
-5. Soru Numarası: Fotoğrafta basılı olan orijinal soru numarasını oku (örn: 20).
-6. Soru Türü (soruTuru): "coktan_secmeli", "bosluk_doldurma", "acik_uclu", "dogru_yanlis".
-7. Ders: Tam ders adı (Örn: "Fizik (AYT)", "Kimya (AYT)", "Biyoloji (AYT)", "Matematik (TYT)", "Türkçe (TYT)", "Geometri", "Tarih-1", "Coğrafya-1").
-8. Ünite: Sorunun ait olduğu MEB ana ünitesi.
-9. Konu: Sorunun alt konu başlığı.
-10. MEB Kazanım Kodu ve Açıklaması:
+2. SAYFADAKİ TÜM TAM BASILI SORULARI ÇIKAR VE ÇÖZ (BOŞ / ÇÖZÜLMEMİŞ SAYFALAR DAHİL):
+   - Sayfada kaç adet tam basılı soru varsa, JSON dizisinde TAM O KADAR soru objesi döndür!
+   - Öğrencinin üzerine işaretleme yaptığı, kurşun/tükenmez/kırmızı/mavi kalemle tik (✓) koyduğu, daire içine aldığı, şıkkı karaladığı soruları öncelikle tespit et.
+   - ÖĞRENCİ ÇÖZMEMİŞ VEYA BOŞ BIRAKMIŞ OLSA BİLE: Öğrencinin sayfadaki soruları çözmemiş veya boş bırakmış olması durumunda DA SAYFADAKİ TÜM BASILI SORULARI ÇIKAR VE ÇÖZ! Öğrencinin işaretlediği şıkkı "Boş" olarak kaydet ('isaretlenenSik': "Boş", 'ogrenciCevabi': "Boş", 'durum': "bos", 'dogruMu': false), doğru cevabı, MEB kazanımını, kutu koordinatlarını ve detaylı çözümü eksiksiz yaz.
+3. Soru Numarası: Fotoğrafta basılı olan orijinal soru numarasını oku (örn: 20).
+4. Soru Türü (soruTuru): "coktan_secmeli", "bosluk_doldurma", "acik_uclu", "dogru_yanlis".
+5. Ders: Tam ders adı (Örn: "Fizik (AYT)", "Kimya (AYT)", "Biyoloji (AYT)", "Matematik (TYT)", "Türkçe (TYT)", "Geometri", "Tarih-1", "Coğrafya-1").
+6. Ünite: Sorunun ait olduğu MEB ana ünitesi.
+7. Konu: Sorunun alt konu başlığı.
+8. MEB Kazanım Kodu ve Açıklaması:
    - "kazanimKodu": Gerçek MEB kazanım kodu (Örn: "MAT.10.1.2", "FIZ.11.2.1", "KIM.10.3.1", "BIY.11.1.4").
    - "kazanimAciklama": Sorunun ölçtüğü tam MEB kazanım açıklaması.
-11. Çözüm Detayı (cozumDetayi): Sorunun tam, adım adım matematiksel/mantıksal çözümü (LaTeX formüllerini JSON için çift ters çizgi \\\\ ile yaz).
-12. ŞIKLI SORULARDA İŞARETLENEN ŞIK VE DURUM:
-    - Öğrencinin kurşun/tükenmez/kırmızı/mavi kalemle daire içine aldığı, boyadığı, yanına tik (✓) koyduğu veya yazdığı şıkkı ("A", "B", "C", "D", "E") 'isaretlenenSik' ve 'ogrenciCevabi' olarak oku.
-    - ÖĞRENCİ SORUYU ÇÖZMEMİŞ / BOŞ BIRAKMIŞSA:
+9. Çözüm Detayı (cozumDetayi): Sorunun tam, adım adım matematiksel/mantıksal çözümü (LaTeX formüllerini JSON için çift ters çizgi \\\\ ile yaz).
+10. İŞARETLENEN ŞIKKI BULMA VE TESPİT ETME TALİMATI (ÇOK DİKKATLİ İNCELE):
+    - Öğrencinin soru üzerinde işaretlediği şıkkı tespit ederken şu işaretleme türlerini ara:
+      * DAİRE / YUVARLAK İÇİNE ALMA: Öğrenci şık harfini (A, B, C, D veya E) ya da parantezini daire içine almışsa o şıkkı işaretlemiştir.
+      * ŞIK HARFİNİ BOYAMA VEYA KARALAMA: Şık harfinin veya yuvarlağının içi kurşun/tükenmez kalemle doldurulmuş veya karalanmışsa o şık seçilmiştir.
+      * TİK İŞARETİ (✓): Şık harfinin hemen yanına, üstüne veya soluna konulan onay/tik işareti o şıkkın seçildiğini gösterir.
+      * ALTINI ÇİZME: Bir şıkkın metninin veya harfinin altı belirgin çizilmiş ve başka işaretleme yoksa o şık seçilmiştir.
+      * YANINA EL YAZISIYLA YAZMA: Soru kenarına öğrenci açıkça tek bir şık harfi yazmışsa (Örn: "Cevap C" veya sadece "D") o şık seçilmiştir.
+    - ELENEN / ÜSTÜ ÇİZİLEN ŞIKLARA DİKKAT ET (BU ŞIKLARI SEÇİLDİ SANMA):
+      * Öğrenci bir şıkkı elemek için üstüne düz çizgi (—) veya çarpı (X) atmış olabilir. Üstü çizilerek elenen şık işaretlenen şık DEĞİLDİR! Asıl işaretlenen şık; elenmeyen, daire içine alınan, boyanan veya tik atılan şıktır.
+    - ÖĞRENCİ SORUYU ÇÖZMEMİŞ / BOŞ BIRAKMIŞSA (HİÇBİR İŞARETLEME YOKSA):
       "isaretlenenSik": "Boş", "ogrenciCevabi": "Boş", "durum": "bos", "dogruMu": false
-    - ÖĞRENCİ DOĞRU ŞIKKI İŞARETLEMEMİŞ VE DOĞRU ÇÖZMÜŞSE:
-      "isaretlenenSik": doğru şık, "ogrenciCevabi": doğru şık, "durum": "dogru", "dogruMu": true
-    - ÖĞRENCİ YANLIŞ ŞIKKI İŞARETLEMEMİŞSE:
-      "isaretlenenSik": işaretlenen yanlış şık, "ogrenciCevabi": işaretlenen yanlış şık, "durum": "yanlis", "dogruMu": false
-    - ÖNEMLİ: Boş bırakılan soruları KESİNLİKLE 'yanlis' yapmayın, 'durum': 'bos' olarak belirtin! Boş sorular netten düşülmez, yanlışlar netten düşülür.
-13. ÇÖZÜM İLE DOĞRU CEVAP BÜTÜNLÜĞÜ:
+    - ÖĞRENCİ DOĞRU ŞIKKI İŞARETLEMİŞSE:
+      "isaretlenenSik": işaretlenen harf, "ogrenciCevabi": işaretlenen harf, "durum": "dogru", "dogruMu": true
+    - ÖĞRENCİ YANLIŞ ŞIKKI İŞARETLEMİŞSE:
+      "isaretlenenSik": işaretlenen yanlış harf, "ogrenciCevabi": işaretlenen yanlış harf, "durum": "yanlis", "dogruMu": false
+    - ASLA doğru cevabı öğrenci işaretlemiş gibi varsayma! Öğrencinin işaretlediği şık (örn: "A") ile sorunun doğru cevabı (örn: "C") farklıysa, 'isaretlenenSik': "A" ve 'dogruCevap': "C" yazılmalıdır.
+    - Boş bırakılan soruları KESİNLİKLE 'yanlis' yapmayın, 'durum': 'bos' olarak belirtin! Boş sorular netten düşülmez, yanlışlar netten düşülür.
+11. ÇÖZÜM İLE DOĞRU CEVAP BÜTÜNLÜĞÜ:
     - 'cozumDetayi' metninde ulaşılan nihai cevap hangi şıksa (örn: "Cevap: E"), 'dogruCevap' alanı da %100 BİREBİR O HARF ("E") olmalıdır. Çözüm metni ile 'dogruCevap' harfi çelişmesin!
-14. BOŞLUK DOLDURMA, AÇIK UÇLU VE SAYISAL SORULARDA EL YAZISI TESPİTİ:
+12. BOŞLUK DOLDURMA, AÇIK UÇLU VE SAYISAL SORULARDA EL YAZISI TESPİTİ:
     - Soru şıklı değilse veya öğrenci soru alanına el yazısıyla işlem/çözüm yapmışsa soruTuru: "acik_uclu" veya "bosluk_doldurma" olarak belirle.
     - EL YAZISI VE SONUÇ: Sorunun altına, çözüm kutusuna, kenar boşluğuna veya soru metninin yanına öğrencinin kurşun/tükenmez kalemle yazdığı işlemleri, ulaştığı nihai sayıyı, daire/kutu içine aldığı sonucu veya kelimeyi (Örn: "12", "x=12", "Fotosentez", "42", "4/3") DİKKATLE OKU ve 'ogrenciCevabi' alanına yaz!
     - Sayfada öğrencinin el yazısıyla yazdığı bir sayı/cevap varken ASLA "Boş" yazma!
     - Yalnızca soru alanında ve kenarlarında öğrenciye ait HİÇBİR el yazısı veya işlem bulunmuyorsa ogrenciCevabi: "Boş" yaz.
     - dogruCevap: Sorunun doğru çözümü/sonucu (Örn: "12", "Fotosentez").
     - isaretlenenSik: "-".
-15. Soru Kırpma Alanı / Bounding Box (kutu):
+13. Soru Kırpma Alanı / Bounding Box (kutu):
     - Sorunun sayfadaki tam sınırları: [ymin, xmin, ymax, xmax] (0-1000 standardında koordinatlar).
     - ÜST SINIR (ymin): Soru numarasının başladığı üst kenar.
     - ALT SINIR (ymax): Sorunun EN SON şıkkının (E şıkkı) bittiği alt kenar (şıkları asla yarıda kesme, E şıkkını eksiksiz dahil et!).
@@ -4814,12 +4812,51 @@ DİKKAT: Bu sınav sayfası fotoğrafında (Sayfa ${pageIdx + 1}, ${job.sinavTur
           // Successfully processed this missing page
           job.missingPageIndices.shift();
 
-          const newCoveredCount = new Set((job.solvedQuestions || []).map((q: any) => q.sayfaIndex !== undefined ? q.sayfaIndex : (q.sayfaNo ? q.sayfaNo - 1 : 0))).size;
+          // Sort questions cleanly by page index and re-index question numbers
+          job.solvedQuestions.sort((a: any, b: any) => {
+            const aP = (a.sayfaIndex !== undefined && typeof a.sayfaIndex === 'number') ? a.sayfaIndex : (a.sayfaNo ? a.sayfaNo - 1 : 0);
+            const bP = (b.sayfaIndex !== undefined && typeof b.sayfaIndex === 'number') ? b.sayfaIndex : (b.sayfaNo ? b.sayfaNo - 1 : 0);
+            if (aP !== bP) return aP - bP;
+            const aY = Array.isArray(a.kutu) && a.kutu.length >= 4 ? a.kutu[0] : 0;
+            const bY = Array.isArray(b.kutu) && b.kutu.length >= 4 ? b.kutu[0] : 0;
+            if (aY !== bY) return aY - bY;
+            return (a.soruNo || 0) - (b.soruNo || 0);
+          });
+          job.solvedQuestions.forEach((q: any, idx: number) => {
+            q.soruNo = idx + 1;
+          });
+
+          const currentRealQuestions = job.solvedQuestions.filter((q: any) => 
+            q.unite !== "Çözülmemiş / Boş Sayfa" && 
+            q.unite !== "Boş / Çözülmemiş Sayfa" && 
+            q.ders !== "Genel" &&
+            q.kazanimAciklama !== "Bu sayfada öğrenci tarafından çözülmüş soru bulunmuyor."
+          );
+
+          const curDogru = currentRealQuestions.filter((q: any) => q.durum === "dogru" || (q.durum !== "bos" && q.dogruMu)).length;
+          const curBos = currentRealQuestions.filter((q: any) => q.durum === "bos" || (!q.dogruMu && (q.isaretlenenSik === "Boş" || q.ogrenciCevabi === "Boş"))).length;
+          const curYanlis = Math.max(0, currentRealQuestions.length - curDogru - curBos);
+
+          const curTestQ = currentRealQuestions.filter((q: any) => !q.soruTuru || q.soruTuru === 'coktan_secmeli');
+          const curTestD = curTestQ.filter((q: any) => q.durum === "dogru" || (q.durum !== "bos" && q.dogruMu)).length;
+          const curTestB = curTestQ.filter((q: any) => q.durum === "bos" || (!q.dogruMu && (q.isaretlenenSik === "Boş" || q.ogrenciCevabi === "Boş"))).length;
+          const curTestY = Math.max(0, curTestQ.length - curTestD - curTestB);
+          const curNet = Number(Math.max(0, curTestD - curTestY * 0.25).toFixed(2));
+
+          const newCoveredCount = new Set(
+            currentRealQuestions.map((q: any) => (q.sayfaIndex !== undefined && typeof q.sayfaIndex === 'number') ? q.sayfaIndex : (q.sayfaNo ? q.sayfaNo - 1 : 0))
+          ).size;
+
           await persistArchiveRecord({
             id: job.archiveId,
             aiStatus: "processing",
             aiStatusMessage: `Devam ediyor (${newCoveredCount}/${totalPages} Sayfa Tamamlandı)...`,
-            toplamSoru: job.solvedQuestions.length,
+            toplamSoru: currentRealQuestions.length || job.solvedQuestions.length,
+            dogruSayisi: curDogru,
+            yanlisSayisi: curYanlis,
+            bosSayisi: curBos,
+            toplamNet: curNet,
+            net: curNet,
             sorular: job.solvedQuestions,
           });
 
@@ -4990,6 +5027,7 @@ function recoverUnfinishedJobs() {
 
     const coveredPagesSet = new Set<number>();
     for (const q of existingQuestions) {
+      if (q.unite === "Çözülmemiş / Boş Sayfa" || q.unite === "Boş / Çözülmemiş Sayfa" || q.ders === "Genel") continue;
       const qAny = q as any;
       const pIdx = (qAny.sayfaIndex !== undefined && typeof qAny.sayfaIndex === 'number' && qAny.sayfaIndex >= 0)
         ? qAny.sayfaIndex
@@ -5241,14 +5279,27 @@ app.post("/api/archives/:id/retry-ai", async (req, res) => {
     memArchives.push(archive);
   }
 
-  const existingQuestions = Array.isArray(archive.sorular) ? archive.sorular : [];
-  const realQuestions = existingQuestions.filter((q: any) => q.unite !== "Çözülmemiş / Boş Sayfa" && q.unite !== "Boş / Çözülmemiş Sayfa" && q.ders !== "Genel");
+  const incomingQuestions = (req.body?.archive && Array.isArray(req.body.archive.sorular) && req.body.archive.sorular.length > 0)
+    ? req.body.archive.sorular
+    : (Array.isArray(archive.sorular) ? archive.sorular : []);
+
+  const isRealQuestion = (q: any) => {
+    if (!q) return false;
+    if (q.unite === "Çözülmemiş / Boş Sayfa" || q.unite === "Boş / Çözülmemiş Sayfa" || q.ders === "Genel") return false;
+    if (typeof q.cozumDetayi === "string" && q.cozumDetayi.includes("Bu sayfa boş bırakılmış")) return false;
+    if (typeof q.kazanimAciklama === "string" && q.kazanimAciklama.includes("Bu sayfada öğrenci tarafından çözülmüş soru bulunmuyor")) return false;
+    return Boolean(q.kazanimKodu && q.kazanimKodu !== "-" && q.cozumDetayi && q.cozumDetayi.length > 5);
+  };
+
+  const realQuestions = incomingQuestions.filter(isRealQuestion);
 
   // Accurately calculate missing page indices across all photos (0 .. photos.length - 1)
   const coveredPagesSet = new Set<number>();
   for (const q of realQuestions) {
     const qAny = q as any;
-    const pIdx = qAny.sayfaIndex !== undefined ? qAny.sayfaIndex : (qAny.sayfaNo ? qAny.sayfaNo - 1 : 0);
+    const pIdx = (qAny.sayfaIndex !== undefined && typeof qAny.sayfaIndex === 'number' && qAny.sayfaIndex >= 0)
+      ? qAny.sayfaIndex
+      : (qAny.sayfaNo ? qAny.sayfaNo - 1 : 0);
     if (typeof pIdx === 'number' && pIdx >= 0) coveredPagesSet.add(pIdx);
   }
 
@@ -5259,17 +5310,25 @@ app.post("/api/archives/:id/retry-ai", async (req, res) => {
     }
   }
 
-  // If all pages were marked covered, but user manually requested retry, re-solve all pages
-  let questionsToKeep = realQuestions;
+  // If ALL pages are already solved with real questions
   if (missingPageIndices.length === 0) {
-    for (let i = 0; i < photos.length; i++) {
-      missingPageIndices.push(i);
-    }
-    questionsToKeep = [];
-    archive.sorular = [];
+    return res.json({
+      success: true,
+      message: `Tüm sayfalar (${photos.length}/${photos.length}) zaten başarıyla çözülmüş durumda.`,
+      archive
+    });
   }
 
-  const nextMissingPage = missingPageIndices[0] !== undefined ? missingPageIndices[0] : 0;
+  // Keep existing real questions from already covered pages
+  const questionsToKeep = realQuestions.filter((q: any) => {
+    const pIdx = (q.sayfaIndex !== undefined && typeof q.sayfaIndex === 'number' && q.sayfaIndex >= 0)
+      ? q.sayfaIndex
+      : (q.sayfaNo ? q.sayfaNo - 1 : 0);
+    return !missingPageIndices.includes(pIdx);
+  });
+
+  const nextMissingPage = missingPageIndices[0];
+  archive.sorular = questionsToKeep;
   archive.lastError = "";
   archive.nextRetryTime = null;
   globalQuotaResetTime = 0; // Bypass rate limit lock immediately for manual retry
@@ -5536,9 +5595,10 @@ GÖREV:
 Sana verilen bu test / sınav sayfası görselindeki (${sinavTuru}, Sayfa ${pageIndex + 1}) BASILI GERÇEK SORULARI tek tek tespit et, sayfa üzerindeki koordinat kutularını belirle ve uzman bir öğretmen gibi pedagojik ve matematiksel olarak çöz.
 
 ÖNEMLİ KURALLAR:
-1. SAYFADA ÖĞRENCİNİN ÇÖZDÜĞÜ / İŞARETLEDİĞİ TÜM SORULARI MUTLAKA AL (KESİNLİKLE ATLAMA):
-   - Öğrencinin üzerine işaretleme yaptığı, kurşun/tükenmez/kırmızı/mavi kalemle tik (✓) koyduğu, daire içine aldığı, şıkkı karaladığı veya el yazısıyla işlem yaptığı TÜM SORULARI MUTLAKA ÇIKAR VE ÇÖZ!
-   - Sayfadaki basılı ve çözülmüş hiçbir soruyu 'kenarda' veya 'kesik' diyerek atlama.
+1. SAYFADAKİ TÜM BASILI SORULARI ÇIKAR VE ÇÖZ (BOŞ / ÇÖZÜLMEMİŞ SAYFALAR DAHİL):
+   - Sayfada kaç adet basılı tam soru varsa, hepsi için birer JSON nesnesi üret!
+   - Öğrencinin üzerine işaretleme yaptığı veya el yazısıyla işlem yaptığı soruları öncelikle tespit et.
+   - ÖĞRENCİ ÇÖZMEMİŞ VEYA BOŞ BIRAKMIŞ OLSA BİLE: Sayfadaki tüm basılı soruları tespit et, çöz ve 'isaretlenenSik': "Boş", 'ogrenciCevabi': "Boş", 'durum': "bos", 'dogruMu': false olarak listele!
 2. Soru Numarası: Fotoğrafta basılı olan orijinal soru numarasını oku (örn: 20).
 3. Soru Türü (soruTuru): "coktan_secmeli", "bosluk_doldurma", "acik_uclu", "dogru_yanlis".
 4. Ders: Tam ders adı (Örn: "Matematik (AYT)", "Matematik (TYT)", "Fizik (AYT)", "Kimya (AYT)", "Biyoloji (AYT)", "Türkçe (TYT)", "Tarih", "Geometri").
@@ -5546,11 +5606,22 @@ Sana verilen bu test / sınav sayfası görselindeki (${sinavTuru}, Sayfa ${page
 6. Konu: Sorunun alt konu başlığı.
 7. MEB Kazanım Kodu ve Açıklaması: "kazanimKodu", "kazanimAciklama".
 8. Çözüm Detayı (cozumDetayi): Sorunun tam, adım adım çözümü.
-9. ŞIKLI SORULARDA İŞARETLENEN ŞIK VE DURUM:
-   - Öğrencinin işaretlediği şıkkı 'isaretlenenSik' ve 'ogrenciCevabi' olarak oku.
-   - ÖĞRENCİ SORUYU ÇÖZMEMİŞ / BOŞ BIRAKMIŞSA: "isaretlenenSik": "Boş", "ogrenciCevabi": "Boş", "durum": "bos", "dogruMu": false
-   - ÖĞRENCİ DOĞRU ŞIKKI İŞARETLEMEMİŞSE: "durum": "dogru", "dogruMu": true
-   - ÖĞRENCİ YANLIŞ ŞIKKI İŞARETLEMEMİŞSE: "durum": "yanlis", "dogruMu": false
+9. İŞARETLENEN ŞIKKI BULMA VE TESPİT ETME TALİMATI (ÇOK DİKKATLİ İNCELE):
+   - Öğrencinin soru üzerinde işaretlediği şıkkı tespit ederken şu işaretleme türlerini ara:
+     * DAİRE / YUVARLAK İÇİNE ALMA: Öğrenci şık harfini (A, B, C, D veya E) ya da parantezini daire içine almışsa o şıkkı işaretlemiştir.
+     * ŞIK HARFİNİ BOYAMA VEYA KARALAMA: Şık harfinin veya yuvarlağının içi kurşun/tükenmez kalemle doldurulmuş veya karalanmışsa o şık seçilmiştir.
+     * TİK İŞARETİ (✓): Şık harfinin hemen yanına, üstüne veya soluna konulan onay/tik işareti o şıkkın seçildiğini gösterir.
+     * ALTINI ÇİZME: Bir şıkkın metninin veya harfinin altı belirgin çizilmiş ve başka işaretleme yoksa o şık seçilmiştir.
+     * YANINA EL YAZISIYLA YAZMA: Soru kenarına öğrenci açıkça tek bir şık harfi yazmışsa (Örn: "Cevap C" veya sadece "D") o şık seçilmiştir.
+   - ELENEN / ÜSTÜ ÇİZİLEN ŞIKLARA DİKKAT ET (BU ŞIKLARI SEÇİLDİ SANMA):
+     * Öğrenci bir şıkkı elemek için üstüne düz çizgi (—) veya çarpı (X) atmış olabilir. Üstü çizilerek elenen şık işaretlenen şık DEĞİLDİR! Asıl işaretlenen şık; elenmeyen, daire içine alınan, boyanan veya tik atılan şıktır.
+   - ÖĞRENCİ SORUYU ÇÖZMEMİŞ / BOŞ BIRAKMIŞSA (HİÇBİR İŞARETLEME YOKSA):
+     "isaretlenenSik": "Boş", "ogrenciCevabi": "Boş", "durum": "bos", "dogruMu": false
+   - ÖĞRENCİ DOĞRU ŞIKKI İŞARETLEMİŞSE:
+     "isaretlenenSik": işaretlenen harf, "ogrenciCevabi": işaretlenen harf, "durum": "dogru", "dogruMu": true
+   - ÖĞRENCİ YANLIŞ ŞIKKI İŞARETLEMİŞSE:
+     "isaretlenenSik": işaretlenen yanlış harf, "ogrenciCevabi": işaretlenen yanlış harf, "durum": "yanlis", "dogruMu": false
+   - ASLA doğru cevabı öğrenci işaretlemiş gibi varsayma! Öğrencinin işaretlediği şık neyse 'isaretlenenSik' olarak onu yaz.
    - Boş bırakılan soruları KESİNLİKLE 'yanlis' yapmayın, 'durum': 'bos' olarak belirtin.
 10. Doğru Cevap: 'dogruCevap' alanına doğru seçeneği ("A", "B", "C", "D", "E") yaz.
 11. SORU KOORDİNAT KUTUSU (kutu):
@@ -5573,7 +5644,7 @@ Yanıt formatı SADECE geçerli bir JSON dizisi [...] olmalıdır.
 
     if (detectedQuestions.length === 0) {
       const retryVision = await executeVisionWithFallback(ai, {
-        prompt: `Bu fotoğrafta (Sayfa ${pageIndex + 1}, ${sinavTuru}) basılı sorular ve öğrenci işaretlemeleri vardır. Her bir soruyu tespit edip çözerek geçerli bir JSON dizisi [...] olarak döndür.`,
+        prompt: `Bu fotoğrafta (Sayfa ${pageIndex + 1}, ${sinavTuru}) basılı test soruları vardır. Öğrenci bu sayfadaki soruları çözmemiş/boş bırakmış olsa bile, sayfada basılı olan tüm soruları tespit et, her soruyu çöz, kutu koordinatlarını [ymin, xmin, ymax, xmax] belirle ve 'isaretlenenSik': 'Boş', 'durum': 'bos' olarak geçerli bir JSON dizisi [...] olarak döndür.`,
         mimeType,
         cleanBase64,
         temperature: 0.1,

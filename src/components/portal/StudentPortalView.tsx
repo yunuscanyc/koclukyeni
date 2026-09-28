@@ -812,8 +812,8 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
                               ? arch.sayfaFotolari
                               : (arch.fotografYollari && arch.fotografYollari.length > 0 ? arch.fotografYollari : []);
                             const totalPages = studentExamPhotos.length || (arch as any).photosCount || (arch as any).sayfaSayisi || 0;
-                            const coveredPagesSet = new Set((arch.sorular || []).map(q => q.sayfaNo || (q.sayfaIndex !== undefined ? q.sayfaIndex + 1 : 1)).filter(Boolean));
-                            const realQuestions = (arch.sorular || []).filter(q => q.unite !== "Çözülmemiş / Boş Sayfa" && q.unite !== "Boş / Çözülmemiş Sayfa");
+                            const realQuestions = (arch.sorular || []).filter(q => q.unite !== "Çözülmemiş / Boş Sayfa" && q.unite !== "Boş / Çözülmemiş Sayfa" && q.ders !== "Genel");
+                            const coveredPagesSet = new Set(realQuestions.map(q => q.sayfaNo || (q.sayfaIndex !== undefined ? q.sayfaIndex + 1 : 1)).filter(Boolean));
                             const isAllCovered = totalPages > 0 && coveredPagesSet.size >= totalPages;
                             const isCompleted = arch.aiStatus === 'completed' || (isAllCovered && realQuestions.length > 0);
                             const isPartiallySolved = totalPages > 0 && coveredPagesSet.size < totalPages;

@@ -213,8 +213,8 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
   const getAIStatusTag = (arch: OgrenciSinavKaydi, isSelected: boolean) => {
     const photos = arch.sayfaFotolari || arch.fotografYollari || [];
     const totalPages = photos.length || (arch as any).photosCount || (arch as any).sayfaSayisi || 0;
-    const realQuestions = (arch.sorular || []).filter(q => q.unite !== "Çözülmemiş / Boş Sayfa" && q.unite !== "Boş / Çözülmemiş Sayfa");
-    const coveredPagesSet = new Set((arch.sorular || []).map(q => (q.sayfaIndex !== undefined && typeof q.sayfaIndex === 'number' && q.sayfaIndex >= 0) ? q.sayfaIndex + 1 : (q.sayfaNo || 1)).filter(Boolean));
+    const realQuestions = (arch.sorular || []).filter(q => q.unite !== "Çözülmemiş / Boş Sayfa" && q.unite !== "Boş / Çözülmemiş Sayfa" && q.ders !== "Genel");
+    const coveredPagesSet = new Set(realQuestions.map(q => (q.sayfaIndex !== undefined && typeof q.sayfaIndex === 'number' && q.sayfaIndex >= 0) ? q.sayfaIndex + 1 : (q.sayfaNo || 1)).filter(Boolean));
     const attemptedPagesSet = new Set(realQuestions.filter(q => q.isaretlenenSik && q.isaretlenenSik !== "Boş").map(q => (q.sayfaIndex !== undefined && typeof q.sayfaIndex === 'number' && q.sayfaIndex >= 0) ? q.sayfaIndex + 1 : (q.sayfaNo || 1)));
     
     const isAllCovered = totalPages > 0 && coveredPagesSet.size >= totalPages;
@@ -871,8 +871,8 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
                     {/* Status Alert for Background AI / Quota */}
                     {(() => {
                       const totalPages = photos.length || (fullArch as any).photosCount || (fullArch as any).sayfaSayisi || 0;
-                      const coveredPagesSet = new Set((fullArch.sorular || []).map(q => (q.sayfaIndex !== undefined && typeof q.sayfaIndex === 'number' && q.sayfaIndex >= 0) ? q.sayfaIndex + 1 : (q.sayfaNo || 1)).filter(Boolean));
-                      const realQuestions = (fullArch.sorular || []).filter(q => q.unite !== "Çözülmemiş / Boş Sayfa" && q.unite !== "Boş / Çözülmemiş Sayfa");
+                      const realQuestions = (fullArch.sorular || []).filter(q => q.unite !== "Çözülmemiş / Boş Sayfa" && q.unite !== "Boş / Çözülmemiş Sayfa" && q.ders !== "Genel");
+                      const coveredPagesSet = new Set(realQuestions.map(q => (q.sayfaIndex !== undefined && typeof q.sayfaIndex === 'number' && q.sayfaIndex >= 0) ? q.sayfaIndex + 1 : (q.sayfaNo || 1)).filter(Boolean));
                       const isAllCovered = totalPages > 0 && coveredPagesSet.size >= totalPages;
                       const isCompleted = fullArch.aiStatus === 'completed' || (isAllCovered && realQuestions.length > 0);
 
