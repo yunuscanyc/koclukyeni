@@ -41,6 +41,7 @@ interface ExamHistoryTabProps {
   allArchives?: OgrenciSinavKaydi[];
   activeStudent?: Student;
   curriculum?: Kazanim[];
+  exams?: DenemeSinavi[];
   onDeleteArchive: (id: string) => void;
   studentName: string;
   onSaveExamArchive?: (archive: OgrenciSinavKaydi, newDeneme?: Omit<DenemeSinavi, 'id'> | DenemeSinavi) => void;
@@ -51,6 +52,7 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
   allArchives,
   activeStudent,
   curriculum = [],
+  exams = [],
   onDeleteArchive,
   studentName,
   onSaveExamArchive,
@@ -498,35 +500,33 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
-            {/* Scope Filter: Student vs All */}
-            {allArchives && allArchives.length > 0 && (
-              <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-2xl border border-slate-200">
-                <button
-                  type="button"
-                  onClick={() => setScopeFilter('student')}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                    scopeFilter === 'student'
-                      ? 'bg-white text-indigo-700 shadow-2xs'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                  title={`${studentName} öğrencisine ait sınavlar`}
-                >
-                  📌 {studentName} ({archives.length})
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setScopeFilter('all')}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                    scopeFilter === 'all'
-                      ? 'bg-indigo-600 text-white shadow-2xs'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                  title="Tüm öğrencilerin yüklediği optik sınavlar"
-                >
-                  🌐 Tüm Öğrenciler ({allArchives.length})
-                </button>
-              </div>
-            )}
+            {/* Scope Filter: Student vs All (Always accessible) */}
+            <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-2xl border border-slate-200">
+              <button
+                type="button"
+                onClick={() => setScopeFilter('student')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                  scopeFilter === 'student'
+                    ? 'bg-white text-indigo-700 shadow-2xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+                title={`${studentName} öğrencisine ait sınavlar`}
+              >
+                📌 {studentName} ({archives.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setScopeFilter('all')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                  scopeFilter === 'all'
+                    ? 'bg-indigo-600 text-white shadow-2xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+                title="Tüm öğrencilerin yüklediği optik sınavlar"
+              >
+                🌐 Tüm Öğrenciler ({(allArchives || []).length})
+              </button>
+            </div>
 
             {/* TYT / AYT Type Filters */}
             <div className="flex items-center gap-1">
@@ -1499,9 +1499,44 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
             );
           })
         ) : (
-          <div className="bg-white border border-slate-200 rounded-3xl p-12 text-center text-slate-400 space-y-2">
-            <Archive className="w-8 h-8 mx-auto text-slate-300" />
-            <p className="text-xs font-semibold">Arşivlenmiş sınav kaydı bulunamadı.</p>
+          <div className="bg-white border border-slate-200 rounded-3xl p-10 text-center space-y-4 shadow-2xs">
+            <div className="w-14 h-14 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center mx-auto">
+              <Archive className="w-7 h-7" />
+            </div>
+            <div className="space-y-1">
+              <h4 className="font-bold text-slate-800 text-sm">
+                {scopeFilter === 'student' ? `${studentName} için henüz optik / fotoğraflı sınav kaydı bulunamadı.` : 'Arşivlenmiş sınav kaydı bulunamadı.'}
+              </h4>
+              <p className="text-xs text-slate-500 max-w-md mx-auto">
+                {scopeFilter === 'student' && allArchives && allArchives.length > 0
+                  ? `Sistemde diğer öğrencilere / genel arşive ait toplam ${allArchives.length} adet sınav kaydı mevcuttur.`
+                  : 'Yeni bir optik sınav taratmak için "Optik Sınav Yükle" butonunu kullanabilirsiniz.'}
+              </p>
+            </div>
+
+            {scopeFilter === 'student' && exams && exams.length > 0 && (
+              <div className="p-3.5 bg-indigo-50/80 border border-indigo-200 rounded-2xl max-w-md mx-auto text-xs text-indigo-950 flex items-center justify-between gap-3 text-left shadow-2xs">
+                <div>
+                  <div className="font-bold flex items-center gap-1.5 text-indigo-900">
+                    <span>📊 "5. Denemeler" Sekmesinde {exams.length} Sınav Kayıtlı</span>
+                  </div>
+                  <div className="text-[11px] text-indigo-700 mt-0.5">
+                    {studentName} için puan ve net analizi <strong>"5. Denemeler"</strong> sekmesinde kayıtlıdır. Sayfa fotoğraflarını yapay zeka ile okutmak için <strong>"Optik Sınav Yükle"</strong> butonunu kullanabilirsiniz.
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {scopeFilter === 'student' && allArchives && allArchives.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setScopeFilter('all')}
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-xs transition-all cursor-pointer inline-flex items-center gap-1.5 active:scale-95"
+              >
+                <Archive className="w-4 h-4" />
+                <span>🌐 Tüm Sınav Arşivini Görüntüle ({allArchives.length} Sınav)</span>
+              </button>
+            )}
           </div>
         )}
       </div>

@@ -157,7 +157,61 @@ export default function App() {
   // Tracks IDs of deleted exams & archives to prevent race-condition re-adding during background polling
   const [deletedIds, setDeletedIds] = useState<string[]>([]);
 
-  // Load initial data directly from server API fast & safely without blocking
+  // Track which modules have been loaded on-demand so we never block boot or download everything upfront
+  const loadedModulesRef = React.useRef<Set<string>>(new Set());
+
+  const loadTabData = useCallback(async (tabName: string) => {
+    if (loadedModulesRef.current.has(tabName)) return;
+    loadedModulesRef.current.add(tabName);
+
+    try {
+      switch (tabName) {
+        case 'genel':
+        case 'koc-notlari':
+          getCoachNotes().then((n) => setNotes(n || [])).catch(() => {});
+          break;
+        case 'soru-takibi':
+          getQuestions().then((q) => setQuestions(q || [])).catch(() => {});
+          break;
+        case 'denemeler':
+          getExams().then((e) => setExams(e || [])).catch(() => {});
+          break;
+        case 'haftalik-program':
+          getSchedules().then((s) => setSchedules(s || [])).catch(() => {});
+          break;
+        case 'sinav-gecmisi':
+          getExamArchives().then((arch) => setExamArchives(arch || [])).catch(() => {});
+          break;
+        case 'atanan-kaynaklar':
+          getBooks().then((b) => setBooks(b || [])).catch(() => {});
+          getAssignedResources().then((ar) => setAssignedResources(ar || [])).catch(() => {});
+          break;
+        case 'raporlar':
+          getExams().then((e) => setExams(e || [])).catch(() => {});
+          getQuestions().then((q) => setQuestions(q || [])).catch(() => {});
+          getExamArchives().then((arch) => setExamArchives(arch || [])).catch(() => {});
+          getCurriculum().then((c) => setCurriculum(c || [])).catch(() => {});
+          break;
+        case 'curriculum_modal':
+          getCurriculum().then((c) => setCurriculum(c || [])).catch(() => {});
+          break;
+        case 'books_modal':
+          getBooks().then((b) => setBooks(b || [])).catch(() => {});
+          break;
+      }
+    } catch (err) {
+      console.warn(`Tab data load error for ${tabName}:`, err);
+    }
+  }, []);
+
+  // Whenever active tab changes, fetch only that tab's data on demand
+  useEffect(() => {
+    if (activeTab) {
+      loadTabData(activeTab);
+    }
+  }, [activeTab, loadTabData]);
+
+  // Load initial data directly from server API: Fast boot by loading only students, coach pin and current tab
   useEffect(() => {
     let isMounted = true;
     async function loadInitialData() {
@@ -188,24 +242,15 @@ export default function App() {
           if (isMounted) setIsLoadingData(false);
         });
 
-      // 2. Load other modules concurrently in the background
+      // 2. Load coach pin
       getCoachPin().then((pin) => {
         if (!isMounted || !pin) return;
         setCoachPin(pin);
         try { localStorage.setItem('yks_coach_pin', pin); } catch {}
       }).catch(() => {});
 
-      getCoachNotes().then((n) => isMounted && setNotes(n || [])).catch(() => {});
-      getQuestions().then((q) => isMounted && setQuestions(q || [])).catch(() => {});
-      getExams().then((e) => isMounted && setExams(e || [])).catch(() => {});
-      getCurriculum().then((c) => isMounted && setCurriculum(c || [])).catch(() => {});
-      getExamArchives().then((arch) => {
-        if (!isMounted) return;
-        setExamArchives(arch || []);
-      }).catch(() => {});
-      getSchedules().then((s) => isMounted && setSchedules(s || [])).catch(() => {});
-      getBooks().then((b) => isMounted && setBooks(b || [])).catch(() => {});
-      getAssignedResources().then((ar) => isMounted && setAssignedResources(ar || [])).catch(() => {});
+      // 3. Load active tab data immediately on boot
+      loadTabData(activeTab || 'genel');
     }
     loadInitialData();
     return () => {
@@ -900,10 +945,20 @@ export default function App() {
     }
   };
 
-  // Photo Exam Archive actions
+  // Photo Exam Archive actions (forgiving Turkish name & studentId matching)
   const studentArchives = examArchives
-    .filter((a) => !a.studentId || a.studentId === activeStudent?.id || (a.ogrenciAdSoyad && activeStudent?.adSoyad && a.ogrenciAdSoyad.toLowerCase().trim() === activeStudent.adSoyad.toLowerCase().trim()))
-    .filter((a) => !deletedIds.includes(a.id));
+    .filter((a) => {
+      if (deletedIds.includes(a.id)) return false;
+      if (!activeStudent) return true;
+      if (a.studentId && a.studentId === activeStudent.id) return true;
+      if (!a.studentId && !a.ogrenciAdSoyad) return true; // unassigned archive available to coach
+      if (a.ogrenciAdSoyad && activeStudent.adSoyad) {
+        const aName = a.ogrenciAdSoyad.toLocaleLowerCase('tr-TR').trim();
+        const sName = activeStudent.adSoyad.toLocaleLowerCase('tr-TR').trim();
+        if (aName === sName || aName.includes(sName) || sName.includes(aName)) return true;
+      }
+      return false;
+    });
   const handleSaveExamArchive = async (
     archive: OgrenciSinavKaydi,
     newDeneme?: Omit<DenemeSinavi, 'id'> | DenemeSinavi
@@ -1294,6 +1349,7 @@ export default function App() {
                 allArchives={examArchives}
                 activeStudent={activeStudent}
                 curriculum={curriculum}
+                exams={studentExams}
                 onDeleteArchive={handleDeleteArchive}
                 onSaveExamArchive={handleSaveExamArchive}
                 studentName={activeStudent.adSoyad}
