@@ -14,6 +14,7 @@ import {
   RotateCw,
   Camera, 
   BookOpen,
+  ChevronLeft,
   ChevronRight,
   ChevronDown,
   ChevronUp,
@@ -26,7 +27,8 @@ import {
   Plus,
   Users,
   Filter,
-  AlertCircle
+  AlertCircle,
+  Scan
 } from 'lucide-react';
 import { OgrenciSinavKaydi, SinavSorusu, DenemeSinavi, Student, Kazanim } from '../../../types';
 import { retryExamAIAnalysis, markArchiveAsRead, getExamArchiveById, resetAndResolveExamAI, saveExamArchive, reanalyzeArchivePage } from '../../../lib/apiService';
@@ -72,6 +74,7 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [selectedQuestionNo, setSelectedQuestionNo] = useState<number | null>(null);
   const [selectedPageFilter, setSelectedPageFilter] = useState<'all' | number>('all');
+  const [showQuestionBoxes, setShowQuestionBoxes] = useState<boolean>(true);
 
   const [isRetrying, setIsRetrying] = useState(false);
   const [retryMessage, setRetryMessage] = useState<string | null>(null);
@@ -314,7 +317,8 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
     setReanalyzingPageNo(pageNo);
     setRetryMessage(`Sayfa ${pageNo} yapay zekâ ile yeniden taranıyor...`);
     try {
-      const res = await reanalyzeArchivePage(arch.id, pageNo - 1, arch);
+      const fullItem = getFullArchiveItem(arch);
+      const res = await reanalyzeArchivePage(arch.id, pageNo - 1, fullItem);
       if (res.success && res.archive) {
         setFullArchiveCache((prev) => ({
           ...prev,
@@ -323,6 +327,9 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
         if (onSaveExamArchive) {
           onSaveExamArchive(res.archive);
         }
+        setSelectedArchiveId(arch.id);
+        setSelectedPageFilter(pageNo);
+        setActivePageIndex(pageNo - 1);
         setRetryMessage(res.message || `Sayfa ${pageNo} başarıyla analiz edildi.`);
       } else {
         setRetryMessage(res.message || 'Sayfada soru tespit edilemedi.');
@@ -584,7 +591,7 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
         {filteredArchives.length > 0 ? (
           filteredArchives.map((arch) => {
             const isSelected = selectedArchiveId === arch.id;
-            const fullArch = isSelected ? getFullArchiveItem(arch) : arch;
+            const fullArch = getFullArchiveItem(arch);
             
             const realQ = (fullArch.sorular || []).filter(q => q.unite !== "Çözülmemiş / Boş Sayfa" && q.unite !== "Boş / Çözülmemiş Sayfa");
             let d = fullArch.dogruSayisi || 0;
@@ -932,10 +939,87 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
                             <Camera className="w-4 h-4 text-indigo-600" />
                             <span>Kitapçık Fotoğrafı ({photos.length} Sayfa)</span>
                           </div>
+
+                          {photos.length > 1 && (
+                            <div className="flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-xl p-0.5 shadow-2xs">
+                              <button
+                                type="button"
+                                disabled={activePageIndex === 0}
+                                onClick={() => {
+                                  const targetIdx = Math.max(0, activePageIndex - 1);
+                                  setActivePageIndex(targetIdx);
+                                  setSelectedPageFilter(targetIdx + 1);
+                                  setZoom(1);
+                                  setPan({ x: 0, y: 0 });
+                                  setRotation(0);
+                                }}
+                                className="p-1 rounded-lg text-slate-600 hover:text-indigo-600 hover:bg-white disabled:opacity-30 disabled:pointer-events-none transition-all"
+                                title="Önceki Sayfa Fotoğrafı"
+                              >
+                                <ChevronLeft className="w-3.5 h-3.5" />
+                              </button>
+
+                              <div className="relative">
+                                <select
+                                  value={activePageIndex}
+                                  onChange={(e) => {
+                                    const targetIdx = Number(e.target.value);
+                                    setActivePageIndex(targetIdx);
+                                    setSelectedPageFilter(targetIdx + 1);
+                                    setZoom(1);
+                                    setPan({ x: 0, y: 0 });
+                                    setRotation(0);
+                                  }}
+                                  className="appearance-none bg-white border border-slate-200 text-slate-800 text-xs font-bold rounded-lg pl-2 pr-6 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer shadow-2xs hover:border-slate-300 transition-all"
+                                  title="Fotoğraf sayfasını seçin"
+                                >
+                                  {photos.map((_, pIdx) => (
+                                    <option key={pIdx} value={pIdx}>
+                                      Sayfa {pIdx + 1} / {photos.length}
+                                    </option>
+                                  ))}
+                                </select>
+                                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-1 text-slate-400">
+                                  <ChevronDown className="w-3 h-3" />
+                                </div>
+                              </div>
+
+                              <button
+                                type="button"
+                                disabled={activePageIndex >= photos.length - 1}
+                                onClick={() => {
+                                  const targetIdx = Math.min(photos.length - 1, activePageIndex + 1);
+                                  setActivePageIndex(targetIdx);
+                                  setSelectedPageFilter(targetIdx + 1);
+                                  setZoom(1);
+                                  setPan({ x: 0, y: 0 });
+                                  setRotation(0);
+                                }}
+                                className="p-1 rounded-lg text-slate-600 hover:text-indigo-600 hover:bg-white disabled:opacity-30 disabled:pointer-events-none transition-all"
+                                title="Sonraki Sayfa Fotoğrafı"
+                              >
+                                <ChevronRight className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          )}
                         </div>
 
-                        {/* Zoom / Pan Controls */}
-                        <div className="flex items-center gap-1 bg-slate-50 border border-slate-200 p-1 rounded-xl self-end sm:self-auto">
+                        {/* Zoom / Pan Controls & Question Box Toggle */}
+                        <div className="flex items-center gap-1 bg-slate-50 border border-slate-200 p-1 rounded-xl self-end sm:self-auto flex-wrap">
+                          <button
+                            type="button"
+                            onClick={() => setShowQuestionBoxes((v) => !v)}
+                            className={`px-2 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${
+                              showQuestionBoxes
+                                ? 'bg-indigo-600 text-white shadow-xs'
+                                : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
+                            }`}
+                            title="Sayfa üzerindeki soru koordinat kutularını göster / gizle"
+                          >
+                            <Scan className="w-3.5 h-3.5" />
+                            <span className="hidden sm:inline">Kutular: {showQuestionBoxes ? 'Açık' : 'Kapalı'}</span>
+                          </button>
+
                           <button
                             type="button"
                             onClick={handleZoomIn}
@@ -998,11 +1082,77 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
                               transformOrigin: 'center center',
                             }}
                           >
-                            <img
-                              src={activePhotoUrl}
-                              alt={`Sayfa ${activePageIndex + 1}`}
-                              className="max-h-[380px] sm:max-h-[460px] w-auto object-contain pointer-events-none rounded shadow-lg"
-                            />
+                            <div className="relative inline-block select-none">
+                              <img
+                                src={activePhotoUrl}
+                                alt={`Sayfa ${activePageIndex + 1}`}
+                                className="max-h-[380px] sm:max-h-[460px] w-auto object-contain pointer-events-none rounded shadow-lg block"
+                              />
+                              {showQuestionBoxes && (
+                                <div className="absolute inset-0 w-full h-full pointer-events-auto">
+                                  {(fullArch.sorular || [])
+                                    .filter((q) => {
+                                      const qPage = q.sayfaNo || (q.sayfaIndex !== undefined ? q.sayfaIndex + 1 : 1);
+                                      return qPage === activePageIndex + 1;
+                                    })
+                                    .map((q) => {
+                                      if (!q.kutu || !Array.isArray(q.kutu) || q.kutu.length !== 4) return null;
+                                      const [ymin, xmin, ymax, xmax] = q.kutu;
+                                      const maxVal = Math.max(ymin, xmin, ymax, xmax);
+                                      const scale = maxVal > 100 ? 1000 : (maxVal <= 1.0 ? 1.0 : 100);
+
+                                      const top = `${Math.max(0, Math.min(100, (ymin / scale) * 100))}%`;
+                                      const left = `${Math.max(0, Math.min(100, (xmin / scale) * 100))}%`;
+                                      const width = `${Math.max(3, Math.min(100, ((xmax - xmin) / scale) * 100))}%`;
+                                      const height = `${Math.max(3, Math.min(100, ((ymax - ymin) / scale) * 100))}%`;
+
+                                      const isCurrent = selectedQuestionNo === q.soruNo;
+                                      const isDogru = q.durum === 'dogru' || (q.durum !== 'bos' && q.dogruMu);
+                                      const isBos = q.durum === 'bos' || (!q.dogruMu && (q.isaretlenenSik === 'Boş' || q.ogrenciCevabi === 'Boş'));
+
+                                      return (
+                                        <div
+                                          key={`kutu-${q.soruNo}`}
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setSelectedQuestionNo(q.soruNo);
+                                            const el = document.getElementById(`question-card-${q.soruNo}`);
+                                            if (el) {
+                                              el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                            }
+                                          }}
+                                          style={{ top, left, width, height }}
+                                          className={`absolute cursor-pointer transition-all duration-150 rounded-lg group ${
+                                            isCurrent
+                                              ? 'border-2 border-indigo-500 bg-indigo-500/30 ring-4 ring-indigo-400/50 shadow-xl z-30 animate-pulse'
+                                              : isDogru
+                                              ? 'border border-emerald-500/80 bg-emerald-500/15 hover:bg-emerald-500/30 hover:border-emerald-400 z-10'
+                                              : isBos
+                                              ? 'border border-amber-500/80 bg-amber-500/15 hover:bg-amber-500/30 hover:border-amber-400 z-10'
+                                              : 'border border-rose-500/80 bg-rose-500/15 hover:bg-rose-500/30 hover:border-rose-400 z-10'
+                                          }`}
+                                          title={`Soru ${q.soruNo} (${q.ders || ''} - ${q.konu || ''}) - Tıkla ve çözüme odaklan`}
+                                        >
+                                          <div
+                                            className={`absolute -top-3 left-1 px-1.5 py-0.5 rounded text-[10px] font-black shadow-xs flex items-center gap-1 pointer-events-none select-none ${
+                                              isCurrent
+                                                ? 'bg-indigo-600 text-white ring-1 ring-white'
+                                                : isDogru
+                                                ? 'bg-emerald-600 text-white'
+                                                : isBos
+                                                ? 'bg-amber-600 text-white'
+                                                : 'bg-rose-600 text-white'
+                                            }`}
+                                          >
+                                            <span>S.{q.soruNo}</span>
+                                            <span>{isDogru ? '✓' : isBos ? '○' : '✗'}</span>
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                </div>
+                              )}
+                            </div>
                           </div>
                         ) : (
                           <div className="text-center text-slate-500 space-y-2 p-6">
@@ -1024,38 +1174,111 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
                         </div>
 
                         {photos.length > 1 && (
-                          <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-xl">
+                          <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 p-1 rounded-xl shadow-2xs flex-wrap">
+                            <span className="text-xs font-bold text-slate-500 pl-1.5 hidden sm:inline">
+                              Sayfa:
+                            </span>
+
+                            {/* Previous Page Button */}
                             <button
                               type="button"
-                              onClick={() => setSelectedPageFilter('all')}
-                              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
-                                selectedPageFilter === 'all'
-                                  ? 'bg-white text-indigo-600 shadow-2xs'
-                                  : 'text-slate-600 hover:text-slate-900'
-                              }`}
+                              disabled={selectedPageFilter === 'all' ? activePageIndex === 0 : selectedPageFilter <= 1}
+                              onClick={() => {
+                                const cur = selectedPageFilter === 'all' ? activePageIndex + 1 : selectedPageFilter;
+                                const targetPage = Math.max(1, cur - 1);
+                                setActivePageIndex(targetPage - 1);
+                                setSelectedPageFilter(targetPage);
+                                setZoom(1);
+                                setPan({ x: 0, y: 0 });
+                                setRotation(0);
+                              }}
+                              className="p-1.5 rounded-lg text-slate-600 hover:text-indigo-600 hover:bg-white disabled:opacity-30 disabled:pointer-events-none transition-all"
+                              title="Önceki Sayfa"
                             >
-                              Tüm Sayfalar
+                              <ChevronLeft className="w-4 h-4" />
                             </button>
-                            {photos.map((_, pIdx) => (
+
+                            {/* Combo Select Dropdown */}
+                            <div className="relative">
+                              <select
+                                value={selectedPageFilter === 'all' ? 'all' : selectedPageFilter.toString()}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  if (val === 'all') {
+                                    setSelectedPageFilter('all');
+                                  } else {
+                                    const pNum = Number(val);
+                                    const pIdx = pNum - 1;
+                                    setActivePageIndex(pIdx);
+                                    setSelectedPageFilter(pNum);
+                                    setZoom(1);
+                                    setPan({ x: 0, y: 0 });
+                                    setRotation(0);
+                                  }
+                                }}
+                                className="appearance-none bg-white border border-slate-200 text-slate-800 text-xs font-bold rounded-lg pl-3 pr-8 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer shadow-2xs hover:border-slate-300 transition-all"
+                              >
+                                <option value="all">
+                                  📚 Tüm Sayfalar (Toplam {fullArch.sorular?.length || 0} Soru)
+                                </option>
+                                {photos.map((_, pIdx) => {
+                                  const pNum = pIdx + 1;
+                                  const pageQCount = (fullArch.sorular || []).filter(
+                                    (q) => (q.sayfaNo || (q.sayfaIndex !== undefined ? q.sayfaIndex + 1 : 1)) === pNum
+                                  ).length;
+                                  return (
+                                    <option key={pIdx} value={pNum.toString()}>
+                                      📄 Sayfa {pNum} / {photos.length} ({pageQCount > 0 ? `${pageQCount} Soru` : 'Boş'})
+                                    </option>
+                                  );
+                                })}
+                              </select>
+                              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2 text-slate-400">
+                                <ChevronDown className="w-3.5 h-3.5" />
+                              </div>
+                            </div>
+
+                            {/* Next Page Button */}
+                            <button
+                              type="button"
+                              disabled={selectedPageFilter === 'all' ? activePageIndex >= photos.length - 1 : selectedPageFilter >= photos.length}
+                              onClick={() => {
+                                const cur = selectedPageFilter === 'all' ? activePageIndex + 1 : selectedPageFilter;
+                                const targetPage = Math.min(photos.length, cur + 1);
+                                setActivePageIndex(targetPage - 1);
+                                setSelectedPageFilter(targetPage);
+                                setZoom(1);
+                                setPan({ x: 0, y: 0 });
+                                setRotation(0);
+                              }}
+                              className="p-1.5 rounded-lg text-slate-600 hover:text-indigo-600 hover:bg-white disabled:opacity-30 disabled:pointer-events-none transition-all"
+                              title="Sonraki Sayfa"
+                            >
+                              <ChevronRight className="w-4 h-4" />
+                            </button>
+
+                            {/* Quick All Pages Toggle Button */}
+                            {selectedPageFilter !== 'all' ? (
                               <button
-                                key={pIdx}
+                                type="button"
+                                onClick={() => setSelectedPageFilter('all')}
+                                className="px-2.5 py-1 rounded-lg text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 transition-all border border-indigo-200 shadow-2xs whitespace-nowrap"
+                                title="Tüm sayfaları birlikte listele"
+                              >
+                                Tümünü Göster
+                              </button>
+                            ) : (
+                              <button
                                 type="button"
                                 onClick={() => {
-                                  setActivePageIndex(pIdx);
-                                  setSelectedPageFilter(pIdx + 1);
-                                  setZoom(1);
-                                  setPan({ x: 0, y: 0 });
-                                  setRotation(0);
+                                  setSelectedPageFilter(activePageIndex + 1);
                                 }}
-                                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
-                                  selectedPageFilter === pIdx + 1
-                                    ? 'bg-white text-indigo-600 shadow-2xs'
-                                    : 'text-slate-600 hover:text-slate-900'
-                                }`}
+                                className="px-2.5 py-1 rounded-lg text-xs font-bold text-slate-600 bg-white hover:bg-slate-100 transition-all border border-slate-200 shadow-2xs whitespace-nowrap"
+                                title={`Sadece Sayfa ${activePageIndex + 1}'i göster`}
                               >
-                                Sayfa {pIdx + 1}
+                                Sayfa {activePageIndex + 1}'e Odaklan
                               </button>
-                            ))}
+                            )}
                           </div>
                         )}
                       </div>
@@ -1077,10 +1300,15 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
                             const isYanlis = !isDogru && !isBlank;
                             const isUnsolvedPlaceholder = q.unite === "Çözülmemiş / Boş Sayfa" || q.unite === "Boş / Çözülmemiş Sayfa" || q.ders === "Genel" || q.konu === "Öğrenci Tarafından Çözülmemiş";
 
+                            const isSelectedQ = selectedQuestionNo === q.soruNo;
                             return (
                               <div
                                 key={q.soruNo}
-                                className={`p-4 rounded-2xl border transition-all space-y-3 ${
+                                id={`question-card-${q.soruNo}`}
+                                onClick={() => setSelectedQuestionNo(q.soruNo)}
+                                className={`p-4 rounded-2xl border transition-all space-y-3 cursor-pointer ${
+                                  isSelectedQ ? 'ring-2 ring-indigo-500 shadow-md' : ''
+                                } ${
                                   isDogru
                                     ? 'bg-emerald-50/40 border-emerald-200'
                                     : isBlank

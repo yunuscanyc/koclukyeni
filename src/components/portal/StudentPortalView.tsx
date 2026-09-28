@@ -17,6 +17,7 @@ import {
   Camera,
   Upload,
   Layers,
+  ChevronLeft,
   ChevronRight,
   ChevronDown,
   ChevronUp,
@@ -1050,18 +1051,84 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
                                       onTouchStart={handleStudentTouchStart}
                                       onTouchMove={handleStudentTouchMove}
                                       onTouchEnd={handleStudentTouchEnd}
-                                      className="w-full h-full flex items-center justify-center cursor-grab active:cursor-grabbing overflow-hidden touch-none"
+                                      className="w-full h-full flex items-center justify-center cursor-grab active:cursor-grabbing overflow-hidden touch-none select-none"
                                     >
-                                      <img
-                                        src={studentExamPhotos[studentActivePageIndex]}
-                                        alt={`Kitapçık Sayfa ${studentActivePageIndex + 1}`}
+                                      <div
                                         style={{
                                           transform: `translate(${studentPan.x}px, ${studentPan.y}px) scale(${studentZoom}) rotate(${studentRotation}deg)`,
                                           transition: studentIsDragging ? 'none' : 'transform 0.15s ease-out',
                                           transformOrigin: 'center center',
                                         }}
-                                        className="max-w-full max-h-full object-contain pointer-events-none select-none"
-                                      />
+                                        className="relative inline-block"
+                                      >
+                                        <img
+                                          src={studentExamPhotos[studentActivePageIndex]}
+                                          alt={`Kitapçık Sayfa ${studentActivePageIndex + 1}`}
+                                          className="max-w-full max-h-full object-contain pointer-events-none select-none block"
+                                        />
+                                        <div className="absolute inset-0 w-full h-full pointer-events-auto">
+                                          {(arch.sorular || [])
+                                            .filter((q) => {
+                                              const qPage = q.sayfaNo || (q.sayfaIndex !== undefined ? q.sayfaIndex + 1 : 1);
+                                              return qPage === studentActivePageIndex + 1;
+                                            })
+                                            .map((q) => {
+                                              if (!q.kutu || !Array.isArray(q.kutu) || q.kutu.length !== 4) return null;
+                                              const [ymin, xmin, ymax, xmax] = q.kutu;
+                                              const maxVal = Math.max(ymin, xmin, ymax, xmax);
+                                              const scale = maxVal > 100 ? 1000 : (maxVal <= 1.0 ? 1.0 : 100);
+
+                                              const top = `${Math.max(0, Math.min(100, (ymin / scale) * 100))}%`;
+                                              const left = `${Math.max(0, Math.min(100, (xmin / scale) * 100))}%`;
+                                              const width = `${Math.max(3, Math.min(100, ((xmax - xmin) / scale) * 100))}%`;
+                                              const height = `${Math.max(3, Math.min(100, ((ymax - ymin) / scale) * 100))}%`;
+
+                                              const isCurrent = studentSelectedQuestionNo === q.soruNo;
+                                              const isDogru = q.durum === 'dogru' || (q.durum !== 'bos' && q.dogruMu);
+                                              const isBos = q.durum === 'bos' || (!q.dogruMu && (q.isaretlenenSik === 'Boş' || q.ogrenciCevabi === 'Boş'));
+
+                                              return (
+                                                <div
+                                                  key={`student-kutu-${q.soruNo}`}
+                                                  onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setStudentSelectedQuestionNo(q.soruNo);
+                                                    const el = document.getElementById(`student-q-card-${q.soruNo}`);
+                                                    if (el) {
+                                                      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                                    }
+                                                  }}
+                                                  style={{ top, left, width, height }}
+                                                  className={`absolute cursor-pointer transition-all duration-150 rounded-lg group ${
+                                                    isCurrent
+                                                      ? 'border-2 border-indigo-500 bg-indigo-500/30 ring-4 ring-indigo-400/50 shadow-xl z-30 animate-pulse'
+                                                      : isDogru
+                                                      ? 'border border-emerald-500/80 bg-emerald-500/15 hover:bg-emerald-500/30 hover:border-emerald-400 z-10'
+                                                      : isBos
+                                                      ? 'border border-amber-500/80 bg-amber-500/15 hover:bg-amber-500/30 hover:border-amber-400 z-10'
+                                                      : 'border border-rose-500/80 bg-rose-500/15 hover:bg-rose-500/30 hover:border-rose-400 z-10'
+                                                  }`}
+                                                  title={`Soru ${q.soruNo} (${q.ders || ''} - ${q.konu || ''})`}
+                                                >
+                                                  <div
+                                                    className={`absolute -top-3 left-1 px-1.5 py-0.5 rounded text-[10px] font-black shadow-xs flex items-center gap-1 pointer-events-none select-none ${
+                                                      isCurrent
+                                                        ? 'bg-indigo-600 text-white ring-1 ring-white'
+                                                        : isDogru
+                                                        ? 'bg-emerald-600 text-white'
+                                                        : isBos
+                                                        ? 'bg-amber-600 text-white'
+                                                        : 'bg-rose-600 text-white'
+                                                    }`}
+                                                  >
+                                                    <span>S.{q.soruNo}</span>
+                                                    <span>{isDogru ? '✓' : isBos ? '○' : '✗'}</span>
+                                                  </div>
+                                                </div>
+                                              );
+                                            })}
+                                        </div>
+                                      </div>
                                     </div>
                                   ) : (
                                     <div className="text-center text-slate-500 text-xs">
@@ -1070,53 +1137,151 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
                                   )}
                                 </div>
 
-                                 {/* Thumbnails Swapper */}
+                                 {/* Thumbnails Swapper / Combo Page Selector */}
                                 {studentExamPhotos && studentExamPhotos.length > 0 && (
-                                  <div className="flex items-center justify-between gap-2 overflow-x-auto pb-1 pt-1">
-                                    <div className="flex items-center gap-1.5">
-                                      <span className="text-[11px] font-bold text-slate-400 mr-1">Sayfalar:</span>
-                                      {studentExamPhotos.map((_, idx) => {
-                                        const pageNum = idx + 1;
-                                        const pageQCount = (arch.sorular || []).filter((q) => (q.sayfaNo || 1) === pageNum).length;
-                                        return (
-                                          <button
-                                            key={idx}
-                                            onClick={() => {
-                                              setStudentActivePageIndex(idx);
-                                              setStudentSelectedPageFilter(idx + 1);
-                                              setStudentZoom(1);
-                                              setStudentPan({ x: 0, y: 0 });
+                                  <div className="flex items-center justify-between gap-2 flex-wrap pb-1 pt-1">
+                                    {studentExamPhotos.length > 4 ? (
+                                      <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 p-1 rounded-xl shadow-2xs flex-wrap">
+                                        <span className="text-xs font-bold text-slate-500 pl-1.5 hidden sm:inline">
+                                          Sayfa:
+                                        </span>
+
+                                        {/* Previous Button */}
+                                        <button
+                                          type="button"
+                                          disabled={studentSelectedPageFilter === 'all' ? studentActivePageIndex === 0 : studentSelectedPageFilter <= 1}
+                                          onClick={() => {
+                                            const cur = studentSelectedPageFilter === 'all' ? studentActivePageIndex + 1 : studentSelectedPageFilter;
+                                            const targetPage = Math.max(1, cur - 1);
+                                            setStudentActivePageIndex(targetPage - 1);
+                                            setStudentSelectedPageFilter(targetPage);
+                                            setStudentZoom(1);
+                                            setStudentPan({ x: 0, y: 0 });
+                                          }}
+                                          className="p-1.5 rounded-lg text-slate-600 hover:text-indigo-600 hover:bg-white disabled:opacity-30 disabled:pointer-events-none transition-all cursor-pointer"
+                                          title="Önceki Sayfa"
+                                        >
+                                          <ChevronLeft className="w-4 h-4" />
+                                        </button>
+
+                                        {/* Combo Dropdown */}
+                                        <div className="relative">
+                                          <select
+                                            value={studentSelectedPageFilter === 'all' ? 'all' : studentSelectedPageFilter.toString()}
+                                            onChange={(e) => {
+                                              const val = e.target.value;
+                                              if (val === 'all') {
+                                                setStudentSelectedPageFilter('all');
+                                              } else {
+                                                const pNum = Number(val);
+                                                const pIdx = pNum - 1;
+                                                setStudentActivePageIndex(pIdx);
+                                                setStudentSelectedPageFilter(pNum);
+                                                setStudentZoom(1);
+                                                setStudentPan({ x: 0, y: 0 });
+                                              }
                                             }}
-                                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border whitespace-nowrap flex items-center gap-1 ${
-                                              studentActivePageIndex === idx
-                                                ? 'bg-indigo-600 text-white border-indigo-600'
-                                                : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                                            className="appearance-none bg-white border border-slate-200 text-slate-800 text-xs font-bold rounded-lg pl-3 pr-8 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer shadow-2xs hover:border-slate-300 transition-all"
+                                          >
+                                            <option value="all">
+                                              📚 Tüm Sayfalar (Toplam {arch.sorular?.length || 0} Soru)
+                                            </option>
+                                            {studentExamPhotos.map((_, idx) => {
+                                              const pageNum = idx + 1;
+                                              const pageQCount = (arch.sorular || []).filter((q) => (q.sayfaNo || 1) === pageNum).length;
+                                              return (
+                                                <option key={idx} value={pageNum.toString()}>
+                                                  📄 Sayfa {pageNum} / {studentExamPhotos.length} ({pageQCount > 0 ? `${pageQCount} Soru` : 'Boş'})
+                                                </option>
+                                              );
+                                            })}
+                                          </select>
+                                          <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2 text-slate-400">
+                                            <ChevronDown className="w-3.5 h-3.5" />
+                                          </div>
+                                        </div>
+
+                                        {/* Next Button */}
+                                        <button
+                                          type="button"
+                                          disabled={studentSelectedPageFilter === 'all' ? studentActivePageIndex >= studentExamPhotos.length - 1 : studentSelectedPageFilter >= studentExamPhotos.length}
+                                          onClick={() => {
+                                            const cur = studentSelectedPageFilter === 'all' ? studentActivePageIndex + 1 : studentSelectedPageFilter;
+                                            const targetPage = Math.min(studentExamPhotos.length, cur + 1);
+                                            setStudentActivePageIndex(targetPage - 1);
+                                            setStudentSelectedPageFilter(targetPage);
+                                            setStudentZoom(1);
+                                            setStudentPan({ x: 0, y: 0 });
+                                          }}
+                                          className="p-1.5 rounded-lg text-slate-600 hover:text-indigo-600 hover:bg-white disabled:opacity-30 disabled:pointer-events-none transition-all cursor-pointer"
+                                          title="Sonraki Sayfa"
+                                        >
+                                          <ChevronRight className="w-4 h-4" />
+                                        </button>
+
+                                        {studentSelectedPageFilter !== 'all' ? (
+                                          <button
+                                            type="button"
+                                            onClick={() => setStudentSelectedPageFilter('all')}
+                                            className="px-2.5 py-1 rounded-lg text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 transition-all border border-indigo-200 shadow-2xs whitespace-nowrap cursor-pointer"
+                                          >
+                                            Tümünü Göster
+                                          </button>
+                                        ) : (
+                                          <button
+                                            type="button"
+                                            onClick={() => setStudentSelectedPageFilter(studentActivePageIndex + 1)}
+                                            className="px-2.5 py-1 rounded-lg text-xs font-bold text-slate-600 bg-white hover:bg-slate-100 transition-all border border-slate-200 shadow-2xs whitespace-nowrap cursor-pointer"
+                                          >
+                                            Sayfa {studentActivePageIndex + 1}'e Odaklan
+                                          </button>
+                                        )}
+                                      </div>
+                                    ) : (
+                                      <div className="flex items-center gap-1.5 flex-wrap">
+                                        <span className="text-[11px] font-bold text-slate-400 mr-1">Sayfalar:</span>
+                                        {studentExamPhotos.map((_, idx) => {
+                                          const pageNum = idx + 1;
+                                          const pageQCount = (arch.sorular || []).filter((q) => (q.sayfaNo || 1) === pageNum).length;
+                                          return (
+                                            <button
+                                              key={idx}
+                                              onClick={() => {
+                                                setStudentActivePageIndex(idx);
+                                                setStudentSelectedPageFilter(idx + 1);
+                                                setStudentZoom(1);
+                                                setStudentPan({ x: 0, y: 0 });
+                                              }}
+                                              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border whitespace-nowrap flex items-center gap-1 cursor-pointer ${
+                                                studentActivePageIndex === idx
+                                                  ? 'bg-indigo-600 text-white border-indigo-600'
+                                                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                                              }`}
+                                            >
+                                              <span>{pageNum}. Sayfa</span>
+                                              {pageQCount > 0 && (
+                                                <span className={`text-[9px] px-1.5 rounded-full font-bold ${
+                                                  studentActivePageIndex === idx ? 'bg-indigo-800 text-indigo-100' : 'bg-slate-100 text-slate-600'
+                                                }`}>
+                                                  {pageQCount} Soru
+                                                </span>
+                                              )}
+                                            </button>
+                                          );
+                                        })}
+                                        {studentExamPhotos.length > 1 && (
+                                          <button
+                                            onClick={() => setStudentSelectedPageFilter('all')}
+                                            className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all border whitespace-nowrap cursor-pointer ${
+                                              studentSelectedPageFilter === 'all'
+                                                ? 'bg-slate-800 text-white border-slate-800'
+                                                : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
                                             }`}
                                           >
-                                            <span>{pageNum}. Sayfa</span>
-                                            {pageQCount > 0 && (
-                                              <span className={`text-[9px] px-1.5 rounded-full font-bold ${
-                                                studentActivePageIndex === idx ? 'bg-indigo-800 text-indigo-100' : 'bg-slate-100 text-slate-600'
-                                              }`}>
-                                                {pageQCount} Soru
-                                              </span>
-                                            )}
+                                            Tüm Soruları Göster
                                           </button>
-                                        );
-                                      })}
-                                    </div>
-
-                                    {studentExamPhotos.length > 1 && (
-                                      <button
-                                        onClick={() => setStudentSelectedPageFilter('all')}
-                                        className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all border whitespace-nowrap ${
-                                          studentSelectedPageFilter === 'all'
-                                            ? 'bg-slate-800 text-white border-slate-800'
-                                            : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-                                        }`}
-                                      >
-                                        Tüm Soruları Göster
-                                      </button>
+                                        )}
+                                      </div>
                                     )}
                                   </div>
                                 )}
@@ -1164,6 +1329,7 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
                                     return (
                                       <div
                                         key={q.soruNo}
+                                        id={`student-q-card-${q.soruNo}`}
                                         onClick={() => {
                                           setStudentSelectedQuestionNo(q.soruNo);
                                           const pNum = q.sayfaNo || 1;

@@ -5491,8 +5491,17 @@ app.post("/api/archives/:id/reanalyze-page", async (req, res) => {
     }
   }
 
-  if (!archive && req.body && req.body.archive) {
-    archive = req.body.archive;
+  if (req.body && req.body.archive) {
+    if (archive) {
+      archive = {
+        ...archive,
+        ...req.body.archive,
+        sayfaFotolari: archive.sayfaFotolari || req.body.archive.sayfaFotolari,
+        fotografYollari: archive.fotografYollari || req.body.archive.fotografYollari,
+      };
+    } else {
+      archive = req.body.archive;
+    }
   }
 
   if (!archive) {
@@ -5500,7 +5509,7 @@ app.post("/api/archives/:id/reanalyze-page", async (req, res) => {
   }
 
   const photos = await getArchiveFullPhotos(id);
-  const imgItem = photos[pageIndex];
+  const imgItem = photos[pageIndex] || (archive.sayfaFotolari && archive.sayfaFotolari[pageIndex]) || (archive.fotografYollari && archive.fotografYollari[pageIndex]);
   if (!imgItem) {
     return res.status(400).json({ success: false, message: `Sayfa ${pageIndex + 1} için kayıtlı fotoğraf bulunamadı.` });
   }
@@ -5524,7 +5533,7 @@ TALİMAT:
 "Bu testteki soruları çöz, soru türünü (çoktan seçmeli, boşluk doldurma, açık uçlu), MEB kazanımlarını, ünitesini ve ders adını ver, çözümlerle kazanımları birleştir."
 
 GÖREV:
-Sana verilen bu test / sınav sayfası görselindeki (${sinavTuru}, Sayfa ${pageIndex + 1}) BASILI GERÇEK SORULARI tek tek tespit et ve uzman bir öğretmen gibi pedagojik ve matematiksel olarak çöz.
+Sana verilen bu test / sınav sayfası görselindeki (${sinavTuru}, Sayfa ${pageIndex + 1}) BASILI GERÇEK SORULARI tek tek tespit et, sayfa üzerindeki koordinat kutularını belirle ve uzman bir öğretmen gibi pedagojik ve matematiksel olarak çöz.
 
 ÖNEMLİ KURALLAR:
 1. SAYFADA ÖĞRENCİNİN ÇÖZDÜĞÜ / İŞARETLEDİĞİ TÜM SORULARI MUTLAKA AL (KESİNLİKLE ATLAMA):
@@ -5544,6 +5553,10 @@ Sana verilen bu test / sınav sayfası görselindeki (${sinavTuru}, Sayfa ${page
    - ÖĞRENCİ YANLIŞ ŞIKKI İŞARETLEMEMİŞSE: "durum": "yanlis", "dogruMu": false
    - Boş bırakılan soruları KESİNLİKLE 'yanlis' yapmayın, 'durum': 'bos' olarak belirtin.
 10. Doğru Cevap: 'dogruCevap' alanına doğru seçeneği ("A", "B", "C", "D", "E") yaz.
+11. SORU KOORDİNAT KUTUSU (kutu):
+    - Sorunun sayfa görselindeki koordinatlarını [ymin, xmin, ymax, xmax] (0 ile 1000 arasında normalize edilmiş tamsayı) olarak "kutu" alanına MUTLAKA yaz.
+    - Örnek: "kutu": [120, 45, 430, 485]
+    - Soru numarasını, metnini, şeklini ve tüm şıklarını içine alacak şekilde tam dikdörtgen sınırlarını ver.
 
 Yanıt formatı SADECE geçerli bir JSON dizisi [...] olmalıdır.
 `;
