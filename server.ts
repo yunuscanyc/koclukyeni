@@ -2846,110 +2846,13 @@ async function executeVisionWithFallback(
     }
   }
 
-  // 2. xAI Grok Vision Fallback (GROK_API_KEY or XAI_API_KEY)
-  const grokKey = process.env.GROK_API_KEY || process.env.XAI_API_KEY || "";
-  if (grokKey && grokKey.trim().length > 0) {
-    try {
-      console.log(`[xAI Grok Vision Fallback] Grok 2 Vision deneniyor...`);
-      const grokText = await callGrokVision(grokKey.trim(), params);
-      if (grokText && grokText.trim().length > 0) {
-        addSystemLog({
-          level: 'success',
-          source: 'gemini',
-          message: `✅ xAI Grok 2 Vision ile görsel soru çözümü tamamlandı.`,
-          model: "grok-2-vision",
-        });
-        return { text: grokText, usedModel: "grok-2-vision" };
-      }
-    } catch (grokErr: any) {
-      console.warn(`[xAI Grok Vision] Başarısız:`, grokErr?.message || grokErr);
-    }
-  }
-
-  // 3. OpenAI Vision Fallback (OPENAI_API_KEY)
-  const openaiKey = process.env.OPENAI_API_KEY || "";
-  if (openaiKey && openaiKey.trim().length > 0) {
-    try {
-      console.log(`[OpenAI Vision Fallback] GPT-4o Vision deneniyor...`);
-      const openaiText = await callOpenAIVision(openaiKey.trim(), params);
-      if (openaiText && openaiText.trim().length > 0) {
-        addSystemLog({
-          level: 'success',
-          source: 'gemini',
-          message: `✅ OpenAI GPT-4o Vision ile görsel soru çözümü tamamlandı.`,
-          model: "openai-gpt-4o",
-        });
-        return { text: openaiText, usedModel: "openai-gpt-4o" };
-      }
-    } catch (openaiErr: any) {
-      console.warn(`[OpenAI Vision] Başarısız:`, openaiErr?.message || openaiErr);
-    }
-  }
-
-  // 4. OpenRouter Vision Fallback (OPENROUTER_API_KEY) - includes Grok, OpenAI, Qwen 2.5 VL, etc.
-  const openrouterKey = process.env.OPENROUTER_API_KEY || "";
-  if (openrouterKey && openrouterKey.trim().length > 0) {
-    try {
-      console.log(`[OpenRouter Vision Fallback] OpenRouter Vision (Grok / OpenAI / Qwen) deneniyor...`);
-      const openRouterText = await callOpenRouterVision(openrouterKey.trim(), params);
-      if (openRouterText && openRouterText.trim().length > 0) {
-        addSystemLog({
-          level: 'success',
-          source: 'gemini',
-          message: `✅ OpenRouter (Grok / OpenAI / Qwen) ile görsel soru çözümü tamamlandı.`,
-          model: "openrouter-vision",
-        });
-        return { text: openRouterText, usedModel: "openrouter-vision" };
-      }
-    } catch (orErr: any) {
-      console.warn(`[OpenRouter Vision] Başarısız:`, orErr?.message || orErr);
-    }
-  }
-
-  // 5. Groq Llama 3.2 Vision Fallback (GROQ_API_KEY)
-  const groqKey = process.env.GROQ_API_KEY || "";
-  if (groqKey && groqKey.trim().length > 0) {
-    try {
-      console.log(`[Groq Vision Fallback] Groq Llama 3.2 Vision deneniyor...`);
-      const groqText = await callGroqVision(groqKey.trim(), params);
-      if (groqText && groqText.trim().length > 0) {
-        addSystemLog({
-          level: 'success',
-          source: 'gemini',
-          message: `✅ Groq (Llama 3.2 Vision) ile soru çözümü tamamlandı.`,
-          model: "groq-llama-3.2-vision",
-        });
-        return { text: groqText, usedModel: "groq-llama-3.2-vision" };
-      }
-    } catch (groqErr: any) {
-      console.warn(`[Groq AI] Başarısız:`, groqErr?.message || groqErr);
-    }
-  }
-
-  // 6. Free Pollinations AI Vision Fallback (Open & Keyless)
-  try {
-    console.log(`[Pollinations Free Vision Fallback] Pollinations Vision deneniyor...`);
-    const polText = await callPollinationsVision(params);
-    if (polText && polText.trim().length > 0) {
-      addSystemLog({
-        level: 'success',
-        source: 'gemini',
-        message: `✅ Pollinations (Açık Yapay Zekâ) ile görsel soru çözümü tamamlandı.`,
-        model: "pollinations-vision",
-      });
-      return { text: polText, usedModel: "pollinations-vision" };
-    }
-  } catch (polErr: any) {
-    console.warn(`[Pollinations Vision] Başarısız:`, polErr?.message || polErr);
-  }
-
-  // If all failed, rethrow
+  // If all Gemini models failed, rethrow error to trigger cooldown / queue retry
   if (lastError) {
     (lastError as any).allModelsRateLimited = allRateLimited;
     throw lastError;
   }
 
-  throw new Error("Tüm alternatif AI modelleri (Gemini, Grok, OpenAI, OpenRouter, Groq, Pollinations) başarısız oldu.");
+  throw new Error("Tüm Gemini modelleri ve API anahtarları meşgul veya kota sınırında.");
 }
 
 // Helper: Run Text Generation with Automatic Model Failover
@@ -3016,25 +2919,7 @@ async function executeTextWithFallback(
     }
   }
 
-  // Free Pollinations Text Fallback
-  try {
-    const promptText = params.prompt || (params.parts && params.parts.map((p: any) => p.text || "").join(" ")) || "";
-    if (promptText) {
-      console.log(`[Pollinations Free Text Fallback] Pollinations Text deneniyor...`);
-      const polText = await callPollinationsText({
-        prompt: promptText,
-        systemInstruction: params.systemInstruction,
-        jsonMode: params.jsonMode,
-      });
-      if (polText && polText.trim().length > 0) {
-        return { text: polText, usedModel: "pollinations-text" };
-      }
-    }
-  } catch (polErr: any) {
-    console.warn(`[Pollinations Text Fallback] Başarısız:`, polErr?.message || polErr);
-  }
-
-  throw lastError || new Error("Tüm Flash ve alternatif metin modelleri başarısız oldu.");
+  throw lastError || new Error("Tüm Gemini metin modelleri başarısız oldu.");
 }
 
 // Health check endpoint
