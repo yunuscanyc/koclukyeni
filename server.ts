@@ -3895,14 +3895,16 @@ Sana verilen bu test / sınav sayfası görselindeki (${sinavTuru}) BASILI GERÇ
    - "kazanimAciklama": Sorunun ölçtüğü tam MEB kazanım açıklaması.
 8. Çözüm Detayı (cozumDetayi): Sorunun tam, adım adım matematiksel/mantıksal çözümü (LaTeX formüllerini JSON içinde geçerli olması için gerekirse çift ters çizgi \\\\ ile yaz).
 9. İŞARETLENEN ŞIKKI BULMA VE TESPİT ETME TALİMATI (ÇOK DİKKATLİ İNCELE):
-   - Öğrencinin soru üzerinde işaretlediği şıkkı tespit ederken şu işaretleme türlerini ara:
-     * DAİRE / YUVARLAK İÇİNE ALMA: Öğrenci şık harfini (A, B, C, D veya E) ya da parantezini daire içine almışsa o şıkkı işaretlemiştir.
-     * ŞIK HARFİNİ BOYAMA VEYA KARALAMA: Şık harfinin veya yuvarlağının içi kurşun/tükenmez kalemle doldurulmuş veya karalanmışsa o şık seçilmiştir.
-     * TİK İŞARETİ (✓): Şık harfinin hemen yanına, üstüne veya soluna konulan onay/tik işareti o şıkkın seçildiğini gösterir.
-     * ALTINI ÇİZME: Bir şıkkın metninin veya harfinin altı belirgin çizilmiş ve başka işaretleme yoksa o şık seçilmiştir.
-     * YANINA EL YAZISIYLA YAZMA: Soru kenarına öğrenci açıkça tek bir şık harfi yazmışsa (Örn: "Cevap C" veya sadece "D") o şık seçilmiştir.
+   - Öğrencinin soru üzerinde işaretlediği şıkkı tespit ederken şu işaretleme türlerini çok dikkatli ara:
+     * DAİRE / YUVARLAK / ELİPS İÇİNE ALMA VEYA KUTULAMA (ÇOK ÖNEMLİ):
+       - Öğrenci SADECE şık harfini (A, B, C, D veya E) daireye almış olabilir.
+       - YA DA ŞIKKIN TAMAMINI (şık harfiyle birlikte tüm seçenek metnini, formülünü, sayısını veya satırı komple) daire/elips/oval içine almış veya çerçevelemiş/kutulamış olabilir. Her iki durumda da o şıkkı kesinlikle İŞARETLENMİŞ olarak kabul et ve ilgili şık harfini 'isaretlenenSik' olarak yaz.
+     * ŞIK HARFİNİ BOYAMA VEYA KARALAMA: Şık harfinin, parantezinin veya yuvarlağının içi kurşun/tükenmez kalemle doldurulmuş, karalanmış veya üzeri belirgin çizilmişse o şık seçilmiştir.
+     * TİK İŞARETİ (✓): Şık harfinin veya şık metninin hemen yanına, üstüne, soluna veya sağına konulan onay/tik işareti o şıkkın seçildiğini gösterir.
+     * ALTINI ÇİZME VEYA VURGULAMA: Bir şık metninin veya harfinin altı çizilmiş, fosforlu/kalemle vurgulanmış ve başka işaretleme yoksa o şık seçilmiştir.
+     * YANINA EL YAZISIYLA YAZMA: Soru kenarına veya yanına öğrenci açıkça tek bir şık harfi yazmışsa (Örn: "Cevap C", "D", "E şıkkı") o şık seçilmiştir.
    - ELENEN / ÜSTÜ ÇİZİLEN ŞIKLARA DİKKAT ET (BU ŞIKLARI SEÇİLDİ SANMA):
-     * Öğrenci bir şıkkı elemek için üstüne düz çizgi (—) veya çarpı (X) atmış olabilir. Üstü çizilerek elenen şık işaretlenen şık DEĞİLDİR! Asıl işaretlenen şık; elenmeyen, daire içine alınan, boyanan veya tik atılan şıktır.
+     * Öğrenci bir veya birden fazla şıkkı elemek için üstüne düz çizgi (—) veya çarpı (X) atmış olabilir. Üstü çizilerek elenen şık işaretlenen şık DEĞİLDİR! Asıl işaretlenen şık; elenmeyen, tamamı veya harfi daire/elips içine alınan, boyanan veya tik atılan şıktır.
    - ÖĞRENCİ SORUYU ÇÖZMEMİŞ / BOŞ BIRAKMIŞSA (HİÇBİR İŞARETLEME YOKSA):
      "isaretlenenSik": "Boş", "ogrenciCevabi": "Boş", "durum": "bos", "dogruMu": false
    - ÖĞRENCİ DOĞRU ŞIKKI İŞARETLEMİŞSE:
@@ -3971,7 +3973,7 @@ Yanıt formatı SADECE geçerli bir JSON dizisi olmalıdır:
 DİKKAT: Bu sınav sayfası görselinde (${sinavTuru}) basılı test soruları bulunmaktadır.
 İlk taramada soru bulunamadı olarak algılandı. Sayfayı çok daha dikkatli incele:
 1. Sayfadaki soru numaralarını (1, 2, 3, 4, 5...) ve soru metinlerini bul.
-2. Sayfada öğrencinin kurşun/tükenmez/kırmızı/mavi kalemle yaptığı TİKLER (✓), ÇARPI, ŞIK HARFİNİ DAİRE İÇİNE ALMA veya EL YAZISI ÇÖZÜMLERİ oku.
+2. Sayfada öğrencinin kurşun/tükenmez/kırmızı/mavi kalemle yaptığı TİKLER (✓), ÇARPI, ŞIK HARFİNİ VEYA ŞIKKIN TAMAMINI DAİRE / ELİPS İÇİNE ALMA, ŞIKKI KUTULAMA, ALTINI ÇİZME veya EL YAZISI ÇÖZÜMLERİ oku.
 3. Öğrenci işaretlemişse 'isaretlenenSik' ve 'ogrenciCevabi' olarak oku.
 4. Hiç işaretlenmemiş sorular için 'isaretlenenSik': "Boş", 'ogrenciCevabi': "Boş", 'durum': "bos", 'dogruMu': false yaz.
 5. Soruları çöz, doğru cevabı 'dogruCevap' alanına yaz.
@@ -4665,14 +4667,16 @@ KRİTİK KURALLAR:
    - "kazanimAciklama": Sorunun ölçtüğü tam MEB kazanım açıklaması.
 9. Çözüm Detayı (cozumDetayi): Sorunun tam, adım adım matematiksel/mantıksal çözümü (LaTeX formüllerini JSON için çift ters çizgi \\\\ ile yaz).
 10. İŞARETLENEN ŞIKKI BULMA VE TESPİT ETME TALİMATI (ÇOK DİKKATLİ İNCELE):
-    - Öğrencinin soru üzerinde işaretlediği şıkkı tespit ederken şu işaretleme türlerini ara:
-      * DAİRE / YUVARLAK İÇİNE ALMA: Öğrenci şık harfini (A, B, C, D veya E) ya da parantezini daire içine almışsa o şıkkı işaretlemiştir.
-      * ŞIK HARFİNİ BOYAMA VEYA KARALAMA: Şık harfinin veya yuvarlağının içi kurşun/tükenmez kalemle doldurulmuş veya karalanmışsa o şık seçilmiştir.
-      * TİK İŞARETİ (✓): Şık harfinin hemen yanına, üstüne veya soluna konulan onay/tik işareti o şıkkın seçildiğini gösterir.
-      * ALTINI ÇİZME: Bir şıkkın metninin veya harfinin altı belirgin çizilmiş ve başka işaretleme yoksa o şık seçilmiştir.
-      * YANINA EL YAZISIYLA YAZMA: Soru kenarına öğrenci açıkça tek bir şık harfi yazmışsa (Örn: "Cevap C" veya sadece "D") o şık seçilmiştir.
+    - Öğrencinin soru üzerinde işaretlediği şıkkı tespit ederken şu işaretleme türlerini çok dikkatli ara:
+      * DAİRE / YUVARLAK / ELİPS İÇİNE ALMA VEYA KUTULAMA (ÇOK ÖNEMLİ):
+        - Öğrenci SADECE şık harfini (A, B, C, D veya E) daireye almış olabilir.
+        - YA DA ŞIKKIN TAMAMINI (şık harfiyle birlikte tüm seçenek metnini, formülünü, sayısını veya satırı komple) daire/elips/oval içine almış veya çerçevelemiş/kutulamış olabilir. Her iki durumda da o şıkkı kesinlikle İŞARETLENMİŞ olarak kabul et ve ilgili şık harfini 'isaretlenenSik' olarak yaz.
+      * ŞIK HARFİNİ BOYAMA VEYA KARALAMA: Şık harfinin, parantezinin veya yuvarlağının içi kurşun/tükenmez kalemle doldurulmuş, karalanmış veya üzeri belirgin çizilmişse o şık seçilmiştir.
+      * TİK İŞARETİ (✓): Şık harfinin veya şık metninin hemen yanına, üstüne, soluna veya sağına konulan onay/tik işareti o şıkkın seçildiğini gösterir.
+      * ALTINI ÇİZME VEYA VURGULAMA: Bir şık metninin veya harfinin altı çizilmiş, fosforlu/kalemle vurgulanmış ve başka işaretleme yoksa o şık seçilmiştir.
+      * YANINA EL YAZISIYLA YAZMA: Soru kenarına veya yanına öğrenci açıkça tek bir şık harfi yazmışsa (Örn: "Cevap C", "D", "E şıkkı") o şık seçilmiştir.
     - ELENEN / ÜSTÜ ÇİZİLEN ŞIKLARA DİKKAT ET (BU ŞIKLARI SEÇİLDİ SANMA):
-      * Öğrenci bir şıkkı elemek için üstüne düz çizgi (—) veya çarpı (X) atmış olabilir. Üstü çizilerek elenen şık işaretlenen şık DEĞİLDİR! Asıl işaretlenen şık; elenmeyen, daire içine alınan, boyanan veya tik atılan şıktır.
+      * Öğrenci bir veya birden fazla şıkkı elemek için üstüne düz çizgi (—) veya çarpı (X) atmış olabilir. Üstü çizilerek elenen şıklar işaretlenen şık DEĞİLDİR! Asıl işaretlenen şık; elenmeyen, tamamı veya harfi daire/elips içine alınan, boyanan veya tik atılan şıktır.
     - ÖĞRENCİ SORUYU ÇÖZMEMİŞ / BOŞ BIRAKMIŞSA (HİÇBİR İŞARETLEME YOKSA):
       "isaretlenenSik": "Boş", "ogrenciCevabi": "Boş", "durum": "bos", "dogruMu": false
     - ÖĞRENCİ DOĞRU ŞIKKI İŞARETLEMİŞSE:
@@ -4752,7 +4756,7 @@ Yanıt formatı SADECE geçerli bir JSON dizisi olmalıdır:
 DİKKAT: Bu sınav sayfası fotoğrafında (Sayfa ${pageIdx + 1}, ${job.sinavTuru}) basılı test soruları bulunmaktadır.
 İlk taramada soru bulunamadı olarak algılandı. Sayfayı çok daha dikkatli incele:
 1. Sayfadaki soru numaralarını (1, 2, 3, 4, 5...) ve soru metinlerini bul.
-2. Sayfada öğrencinin kurşun/tükenmez/kırmızı/mavi kalemle yaptığı TİKLER (✓), ÇARPI, ŞIK HARFİNİ DAİRE İÇİNE ALMA veya EL YAZISI ÇÖZÜMLERİ oku.
+2. Sayfada öğrencinin kurşun/tükenmez/kırmızı/mavi kalemle yaptığı TİKLER (✓), ÇARPI, ŞIK HARFİNİ VEYA ŞIKKIN TAMAMINI DAİRE / ELİPS İÇİNE ALMA, ŞIKKI KUTULAMA, ALTINI ÇİZME veya EL YAZISI ÇÖZÜMLERİ oku.
 3. Öğrenci işaretlemişse 'isaretlenenSik' ve 'ogrenciCevabi' olarak oku.
 4. Hiç işaretlenmemiş sorular için 'isaretlenenSik': "Boş", 'ogrenciCevabi': "Boş", 'durum': "bos", 'dogruMu': false yaz.
 5. Soruları çöz, doğru cevabı 'dogruCevap' alanına yaz.
@@ -5607,14 +5611,16 @@ Sana verilen bu test / sınav sayfası görselindeki (${sinavTuru}, Sayfa ${page
 7. MEB Kazanım Kodu ve Açıklaması: "kazanimKodu", "kazanimAciklama".
 8. Çözüm Detayı (cozumDetayi): Sorunun tam, adım adım çözümü.
 9. İŞARETLENEN ŞIKKI BULMA VE TESPİT ETME TALİMATI (ÇOK DİKKATLİ İNCELE):
-   - Öğrencinin soru üzerinde işaretlediği şıkkı tespit ederken şu işaretleme türlerini ara:
-     * DAİRE / YUVARLAK İÇİNE ALMA: Öğrenci şık harfini (A, B, C, D veya E) ya da parantezini daire içine almışsa o şıkkı işaretlemiştir.
-     * ŞIK HARFİNİ BOYAMA VEYA KARALAMA: Şık harfinin veya yuvarlağının içi kurşun/tükenmez kalemle doldurulmuş veya karalanmışsa o şık seçilmiştir.
-     * TİK İŞARETİ (✓): Şık harfinin hemen yanına, üstüne veya soluna konulan onay/tik işareti o şıkkın seçildiğini gösterir.
-     * ALTINI ÇİZME: Bir şıkkın metninin veya harfinin altı belirgin çizilmiş ve başka işaretleme yoksa o şık seçilmiştir.
-     * YANINA EL YAZISIYLA YAZMA: Soru kenarına öğrenci açıkça tek bir şık harfi yazmışsa (Örn: "Cevap C" veya sadece "D") o şık seçilmiştir.
+   - Öğrencinin soru üzerinde işaretlediği şıkkı tespit ederken şu işaretleme türlerini çok dikkatli ara:
+     * DAİRE / YUVARLAK / ELİPS İÇİNE ALMA VEYA KUTULAMA (ÇOK ÖNEMLİ):
+       - Öğrenci SADECE şık harfini (A, B, C, D veya E) daireye almış olabilir.
+       - YA DA ŞIKKIN TAMAMINI (şık harfiyle birlikte tüm seçenek metnini, formülünü, sayısını veya satırı komple) daire/elips/oval içine almış veya çerçevelemiş/kutulamış olabilir. Her iki durumda da o şıkkı kesinlikle İŞARETLENMİŞ olarak kabul et ve ilgili şık harfini 'isaretlenenSik' olarak yaz.
+     * ŞIK HARFİNİ BOYAMA VEYA KARALAMA: Şık harfinin, parantezinin veya yuvarlağının içi kurşun/tükenmez kalemle doldurulmuş, karalanmış veya üzeri belirgin çizilmişse o şık seçilmiştir.
+     * TİK İŞARETİ (✓): Şık harfinin veya şık metninin hemen yanına, üstüne, soluna veya sağına konulan onay/tik işareti o şıkkın seçildiğini gösterir.
+     * ALTINI ÇİZME VEYA VURGULAMA: Bir şık metninin veya harfinin altı çizilmiş, fosforlu/kalemle vurgulanmış ve başka işaretleme yoksa o şık seçilmiştir.
+     * YANINA EL YAZISIYLA YAZMA: Soru kenarına veya yanına öğrenci açıkça tek bir şık harfi yazmışsa (Örn: "Cevap C", "D", "E şıkkı") o şık seçilmiştir.
    - ELENEN / ÜSTÜ ÇİZİLEN ŞIKLARA DİKKAT ET (BU ŞIKLARI SEÇİLDİ SANMA):
-     * Öğrenci bir şıkkı elemek için üstüne düz çizgi (—) veya çarpı (X) atmış olabilir. Üstü çizilerek elenen şık işaretlenen şık DEĞİLDİR! Asıl işaretlenen şık; elenmeyen, daire içine alınan, boyanan veya tik atılan şıktır.
+     * Öğrenci bir veya birden fazla şıkkı elemek için üstüne düz çizgi (—) veya çarpı (X) atmış olabilir. Üstü çizilerek elenen şıklar işaretlenen şık DEĞİLDİR! Asıl işaretlenen şık; elenmeyen, tamamı veya harfi daire/elips içine alınan, boyanan veya tik atılan şıktır.
    - ÖĞRENCİ SORUYU ÇÖZMEMİŞ / BOŞ BIRAKMIŞSA (HİÇBİR İŞARETLEME YOKSA):
      "isaretlenenSik": "Boş", "ogrenciCevabi": "Boş", "durum": "bos", "dogruMu": false
    - ÖĞRENCİ DOĞRU ŞIKKI İŞARETLEMİŞSE:
