@@ -221,26 +221,12 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
     const isCompleted = arch.aiStatus === 'completed' || (isAllCovered && realQuestions.length > 0);
 
     if (isCompleted) {
-      const solvedCount = attemptedPagesSet.size || coveredPagesSet.size || totalPages;
-      const unattemptedCount = Math.max(0, totalPages - solvedCount);
-
-      if (totalPages > 0 && unattemptedCount > 0 && solvedCount > 0) {
-        return (
-          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md flex items-center gap-1 ${
-            isSelected ? 'bg-sky-400 text-slate-950' : 'bg-sky-50 text-sky-700 border border-sky-200'
-          }`} title={`${totalPages} sayfanın ${solvedCount} sayfası çözüldü, ${unattemptedCount} sayfa boş bırakıldı`}>
-            <CheckCircle2 className="w-3 h-3" />
-            <span>Çözülen: {solvedCount}/{totalPages} ({unattemptedCount} Boş)</span>
-          </span>
-        );
-      }
-
       return (
         <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md flex items-center gap-1 ${
           isSelected ? 'bg-emerald-400 text-slate-950' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-        }`}>
-          <CheckCircle2 className="w-3 h-3" />
-          <span>{totalPages > 0 ? `Çözülen: ${totalPages}/${totalPages} Sayfa` : 'Yapay Zekâ Çözdü'}</span>
+        }`} title={totalPages > 0 ? `Tüm ${totalPages} sayfa yapay zekâ tarafından başarıyla analiz edildi.` : 'Yapay Zekâ Çözdü'}>
+          <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+          <span>{totalPages > 0 ? `Tamamı Analiz Edildi (${totalPages}/${totalPages} Sayfa)` : 'Yapay Zekâ Çözdü'}</span>
         </span>
       );
     }
@@ -251,7 +237,7 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
           isSelected ? 'bg-amber-300 text-amber-950' : 'bg-amber-50 text-amber-800 border border-amber-200'
         }`}>
           <Hourglass className="w-3 h-3" />
-          <span>Kota Bekleniyor (Çözülen: {coveredPagesSet.size}/{totalPages || 1})</span>
+          <span>Kota Bekleniyor ({coveredPagesSet.size}/{totalPages || 1} Sayfa Tamamlandı)</span>
         </span>
       );
     }
@@ -267,7 +253,7 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
         ) : (
           <Clock className="w-3 h-3" />
         )}
-        <span>Çözülen: {coveredPagesSet.size}/{totalPages || 1} Sayfa</span>
+        <span>Analiz Ediliyor: {coveredPagesSet.size}/{totalPages || 1} Sayfa</span>
       </span>
     );
   };
@@ -902,10 +888,10 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
                                   <div className="font-bold text-sm flex flex-wrap items-center gap-2">
                                     <span>
                                       {isRateLimited
-                                        ? `⏳ Yapay Zekâ Kotası / Sunucu Bekleniyor (Çözülen: ${coveredPagesSet.size}/${totalPages || 1} Sayfa)`
+                                        ? `⏳ Yapay Zekâ Kotası / Sunucu Bekleniyor (${coveredPagesSet.size}/${totalPages || 1} Sayfa Tamamlandı)`
                                         : isPending
-                                        ? `⏳ Test Sırada Bekliyor (Çözülen: ${coveredPagesSet.size}/${totalPages || 1} Sayfa)`
-                                        : `⚡ Yapay Zekâ Soruları Çözüyor (Çözülen: ${coveredPagesSet.size}/${totalPages || 1} Sayfa)`}
+                                        ? `⏳ Test Sırada Bekliyor (${coveredPagesSet.size}/${totalPages || 1} Sayfa Analiz Edildi)`
+                                        : `⚡ Yapay Zekâ Soruları Çözüyor (${coveredPagesSet.size}/${totalPages || 1} Sayfa Tamamlandı)`}
                                     </span>
                                     {nextRetryTimeStr && isRateLimited && (
                                       <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-200/80 text-amber-900 border border-amber-300">
@@ -1002,6 +988,26 @@ export const ExamHistoryTab: React.FC<ExamHistoryTabProps> = ({
                               </button>
                             </div>
                           )}
+
+                          <button
+                            type="button"
+                            disabled={reanalyzingPageNo === activePageIndex + 1}
+                            onClick={() => handleReanalyzePage(fullArch, activePageIndex + 1)}
+                            className="px-2.5 py-1 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-600 text-white shadow-2xs transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                            title={`Sayfa ${activePageIndex + 1}'i yapay zeka ile yeniden çöz ve soru kutularını çiz`}
+                          >
+                            {reanalyzingPageNo === activePageIndex + 1 ? (
+                              <>
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                <span>Sayfa Çözülüyor...</span>
+                              </>
+                            ) : (
+                              <>
+                                <Sparkles className="w-3.5 h-3.5" />
+                                <span>Bu Sayfayı Çöz (AI)</span>
+                              </>
+                            )}
+                          </button>
                         </div>
 
                         {/* Zoom / Pan Controls & Question Box Toggle */}

@@ -3689,7 +3689,7 @@ function normalizeAndValidateQuestion(
   let isBlank = false;
   let isaretlenenSik = "";
   let ogrenciCevabi = "";
-  let dogruCevap = rawCorrectAnswer || "A";
+  let dogruCevap = rawCorrectAnswer ? (rawCorrectAnswer.match(/^[A-E]$/i) ? rawCorrectAnswer.toUpperCase() : rawCorrectAnswer) : (cozumOpt || "-");
 
   if (isExplicitBlank || (studentAnsIsBlank && markIsBlank)) {
     isBlank = true;
@@ -3700,6 +3700,8 @@ function normalizeAndValidateQuestion(
     } else if (rawCorrectAnswer) {
       const correctOptMatch = rawCorrectAnswer.match(/^[A-E]$/i) || rawCorrectAnswer.match(/^(?:seçenek|şık)?\s*([A-E])\b/i);
       dogruCevap = correctOptMatch ? (correctOptMatch[1] || correctOptMatch[0]).toUpperCase() : rawCorrectAnswer;
+    } else {
+      dogruCevap = "-";
     }
   } else {
     // At least one field has actual student answer or mark
@@ -3720,8 +3722,10 @@ function normalizeAndValidateQuestion(
         dogruCevap = cozumOpt;
       } else if (correctOptMatch) {
         dogruCevap = (correctOptMatch[1] || correctOptMatch[0]).toUpperCase();
+      } else if (rawCorrectAnswer) {
+        dogruCevap = rawCorrectAnswer.toUpperCase();
       } else {
-        dogruCevap = (rawCorrectAnswer || "A").toUpperCase();
+        dogruCevap = "-";
       }
       isBlank = false;
     } else {
@@ -5290,9 +5294,16 @@ app.post("/api/archives/:id/retry-ai", async (req, res) => {
   const isRealQuestion = (q: any) => {
     if (!q) return false;
     if (q.unite === "Çözülmemiş / Boş Sayfa" || q.unite === "Boş / Çözülmemiş Sayfa" || q.ders === "Genel") return false;
-    if (typeof q.cozumDetayi === "string" && q.cozumDetayi.includes("Bu sayfa boş bırakılmış")) return false;
+    if (typeof q.cozumDetayi === "string" && (
+      q.cozumDetayi.includes("Bu sayfa boş bırakılmış") ||
+      q.cozumDetayi.includes("Çözüm adımları incelendi.") ||
+      q.cozumDetayi.trim().length < 15
+    )) return false;
     if (typeof q.kazanimAciklama === "string" && q.kazanimAciklama.includes("Bu sayfada öğrenci tarafından çözülmüş soru bulunmuyor")) return false;
-    return Boolean(q.kazanimKodu && q.kazanimKodu !== "-" && q.cozumDetayi && q.cozumDetayi.length > 5);
+    if (q.unite === "Genel Konular" && (q.kazanimKodu === "MAT.9.5.2" || q.kazanimKodu?.startsWith("KAZ."))) return false;
+    // Real questions extracted from photos have valid bounding box coordinates
+    if (!Array.isArray(q.kutu) || q.kutu.length !== 4 || (q.kutu[0] === 0 && q.kutu[1] === 0 && q.kutu[2] === 0 && q.kutu[3] === 0)) return false;
+    return Boolean(q.kazanimKodu && q.kazanimKodu !== "-" && q.cozumDetayi && q.cozumDetayi.length >= 15);
   };
 
   const realQuestions = incomingQuestions.filter(isRealQuestion);

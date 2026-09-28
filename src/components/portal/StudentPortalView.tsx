@@ -408,19 +408,10 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
       const solvedPagesCount = attemptedPagesSet.size || coveredPagesSet.size || totalPages;
       const unattemptedPagesCount = Math.max(0, totalPages - solvedPagesCount);
 
-      if (totalPages > 0 && unattemptedPagesCount > 0 && solvedPagesCount > 0) {
-        return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200 text-[11px] font-bold" title={`${totalPages} sayfanın ${solvedPagesCount} sayfası çözülmüş, ${unattemptedPagesCount} sayfası boş bırakılmış`}>
-            <CheckCircle2 className="w-3 h-3 text-blue-600" />
-            <span>Çözülen: {solvedPagesCount}/{totalPages} Sayfa ({unattemptedPagesCount} Boş)</span>
-          </span>
-        );
-      }
-
       return (
-        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-bold">
+        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-bold" title={totalPages > 0 ? `Tüm ${totalPages} sayfa yapay zekâ tarafından başarıyla analiz edildi.` : 'Yapay Zekâ Çözdü'}>
           <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-          <span>{totalPages > 0 ? `Çözülen: ${totalPages}/${totalPages} Sayfa` : 'Yapay Zekâ Çözdü'}</span>
+          <span>{totalPages > 0 ? `Tamamı Analiz Edildi (${totalPages}/${totalPages} Sayfa)` : 'Yapay Zekâ Çözdü'}</span>
         </span>
       );
     }
@@ -429,7 +420,7 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
       return (
         <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200 text-[11px] font-bold animate-pulse">
           <Hourglass className="w-3 h-3 text-amber-600" />
-          <span>Kota Bekleniyor (Çözülen: {coveredPagesSet.size}/{totalPages || 1})</span>
+          <span>Kota Bekleniyor ({coveredPagesSet.size}/{totalPages || 1} Sayfa Tamamlandı)</span>
         </span>
       );
     }
@@ -437,7 +428,7 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
     return (
       <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200 text-[11px] font-bold">
         <Loader2 className="w-3 h-3 text-indigo-600 animate-spin" />
-        <span>Çözülen: {coveredPagesSet.size}/{totalPages || 1} Sayfa</span>
+        <span>Analiz Ediliyor: {coveredPagesSet.size}/{totalPages || 1} Sayfa</span>
       </span>
     );
   };
@@ -871,10 +862,10 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
                                         <div className="font-bold text-sm flex flex-wrap items-center gap-2">
                                           <span>
                                             {isRateLimited
-                                              ? `⏳ Yapay Zekâ Kotası / Sunucu Bekleniyor (Çözülen: ${coveredPagesSet.size}/${totalPages || 1} Sayfa)`
+                                              ? `⏳ Yapay Zekâ Kotası / Sunucu Bekleniyor (${coveredPagesSet.size}/${totalPages || 1} Sayfa Tamamlandı)`
                                               : isPending
-                                              ? `⏳ Test Sırada Bekliyor (Çözülen: ${coveredPagesSet.size}/${totalPages || 1} Sayfa)`
-                                              : `⚡ Yapay Zekâ Soruları Çözüyor (Çözülen: ${coveredPagesSet.size}/${totalPages || 1} Sayfa)`}
+                                              ? `⏳ Test Sırada Bekliyor (${coveredPagesSet.size}/${totalPages || 1} Sayfa Analiz Edildi)`
+                                              : `⚡ Yapay Zekâ Soruları Çözüyor (${coveredPagesSet.size}/${totalPages || 1} Sayfa Tamamlandı)`}
                                           </span>
                                           {nextRetryTimeStr && isRateLimited && (
                                             <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-200/80 text-amber-900 border border-amber-300">
