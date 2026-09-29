@@ -1886,36 +1886,35 @@ function refreshGeminiKeySlots(): GeminiKeySlot[] {
 
 // Get active Gemini client with round-robin load-balancing and cooldown filtering
 function getGeminiClient(): GoogleGenAI | null {
-  const slots = refreshGeminiKeySlots();
-  if (slots.length === 0) {
-    return null;
-  }
-
-  const now = Date.now();
-  // Filter available slots not in cooldown
-  const availableSlots = slots.filter((s) => s.cooldownUntil <= now);
-  if (availableSlots.length > 0) {
-    geminiKeyRoundRobinIndex = (geminiKeyRoundRobinIndex + 1) % availableSlots.length;
-    return availableSlots[geminiKeyRoundRobinIndex].client;
-  }
-
-  // If all are in cooldown, pick the slot that will expire earliest
-  const sorted = [...slots].sort((a, b) => a.cooldownUntil - b.cooldownUntil);
-  return sorted[0].client;
+  const candidates = getGeminiCandidateClients();
+  return candidates.length > 0 ? candidates[0].client : null;
 }
 
-// Get all candidate Gemini clients for failover (active ones first)
-function getGeminiCandidateClients(): GoogleGenAI[] {
+// Get all candidate Gemini clients for failover (load-balanced with sequential Round-Robin rotation)
+function getGeminiCandidateClients(): { client: GoogleGenAI; maskedKey: string }[] {
   const slots = refreshGeminiKeySlots();
   if (slots.length === 0) return [];
 
   const now = Date.now();
   const availableSlots = slots.filter((s) => s.cooldownUntil <= now);
-  if (availableSlots.length > 0) {
-    return availableSlots.map((s) => s.client);
+  const targetSlots = availableSlots.length > 0 
+    ? availableSlots 
+    : [...slots].sort((a, b) => a.cooldownUntil - b.cooldownUntil);
+
+  if (targetSlots.length > 0) {
+    // Monotonically increase starting index to rotate sequentially and prevent reset to 0 on length changes
+    const startIdx = geminiKeyRoundRobinIndex % targetSlots.length;
+    geminiKeyRoundRobinIndex++;
+
+    // Rotate array so startIdx comes first, then startIdx+1, ..., looping back to 0
+    const rotated = [
+      ...targetSlots.slice(startIdx),
+      ...targetSlots.slice(0, startIdx),
+    ];
+    return rotated.map((s) => ({ client: s.client, maskedKey: s.maskedKey }));
   }
-  // If all in cooldown, return sorted by lowest cooldown
-  return [...slots].sort((a, b) => a.cooldownUntil - b.cooldownUntil).map((s) => s.client);
+
+  return [];
 }
 
 // Mark a specific key slot in cooldown when it encounters a 429 Rate Limit error
@@ -2151,217 +2150,6 @@ async function runLiveModelHealthCheck(force = false): Promise<LiveModelHealthIn
             message: (err?.message || String(err)).slice(0, 150)
           };
           verifiedLiveModelsMap.set(model, info);
-          return info;
-        }
-      })());
-    }
-  }
-
-  // 2. Test xAI Grok Models
-  if (grokKey && grokKey.trim().length > 0) {
-    const grokModels = ["grok-2-vision-1212", "grok-2", "grok-vision-beta"];
-    for (const model of grokModels) {
-      checkPromises.push((async () => {
-        const t0 = Date.now();
-        try {
-          const res = await withTimeout(
-            fetch("https://api.x.ai/v1/chat/completions", {
-              method: "POST",
-              headers: { "Authorization": `Bearer ${grokKey.trim()}`, "Content-Type": "application/json" },
-              body: JSON.stringify({ model, messages: [{ role: "user", content: "test" }], max_tokens: 5 }),
-            }),
-            5000,
-            `xAI Grok (${model}) 5sn zaman aşımı`
-          );
-          const latency = Date.now() - t0;
-          const json: any = await res.json().catch(() => ({}));
-          // HTTP 200 or res.ok is strictly successful
-          const isOk = res.ok || res.status === 200;
-          const isRateLimited = res.status === 429;
-          const info: LiveModelHealthInfo = {
-            model: `xai/${model}`,
-            provider: 'grok',
-            status: isOk ? 'ok' : (isRateLimited ? 'rate_limited' : 'error'),
-            isAlive: isOk,
-            latencyMs: latency,
-            lastCheckedAt: now,
-            message: isOk ? 'Canlı ve Hazır' : (json?.error?.message || `HTTP ${res.status}`)
-          };
-          verifiedLiveModelsMap.set(`xai/${model}`, info);
-          return info;
-        } catch (err: any) {
-          const info: LiveModelHealthInfo = {
-            model: `xai/${model}`,
-            provider: 'grok',
-            status: 'error',
-            isAlive: false,
-            latencyMs: Date.now() - t0,
-            lastCheckedAt: now,
-            message: err?.message || 'Grok Erişilemiyor'
-          };
-          verifiedLiveModelsMap.set(`xai/${model}`, info);
-          return info;
-        }
-      })());
-    }
-  }
-
-  // 3. Test OpenAI Models
-  if (openaiKey && openaiKey.trim().length > 0) {
-    const oaiModels = ["gpt-4o", "gpt-4o-mini"];
-    for (const model of oaiModels) {
-      checkPromises.push((async () => {
-        const t0 = Date.now();
-        try {
-          const res = await withTimeout(
-            fetch("https://api.openai.com/v1/chat/completions", {
-              method: "POST",
-              headers: { "Authorization": `Bearer ${openaiKey.trim()}`, "Content-Type": "application/json" },
-              body: JSON.stringify({ model, messages: [{ role: "user", content: "test" }], max_tokens: 5 }),
-            }),
-            5000,
-            `OpenAI (${model}) 5sn zaman aşımı`
-          );
-          const latency = Date.now() - t0;
-          const json: any = await res.json().catch(() => ({}));
-          // HTTP 200 or res.ok is strictly successful
-          const isOk = res.ok || res.status === 200;
-          const isRateLimited = res.status === 429;
-          const info: LiveModelHealthInfo = {
-            model: `openai/${model}`,
-            provider: 'openai',
-            status: isOk ? 'ok' : (isRateLimited ? 'rate_limited' : 'error'),
-            isAlive: isOk,
-            latencyMs: latency,
-            lastCheckedAt: now,
-            message: isOk ? 'Canlı ve Hazır' : (json?.error?.message || `HTTP ${res.status}`)
-          };
-          verifiedLiveModelsMap.set(`openai/${model}`, info);
-          return info;
-        } catch (err: any) {
-          const info: LiveModelHealthInfo = {
-            model: `openai/${model}`,
-            provider: 'openai',
-            status: 'error',
-            isAlive: false,
-            latencyMs: Date.now() - t0,
-            lastCheckedAt: now,
-            message: err?.message || 'OpenAI Erişilemiyor'
-          };
-          verifiedLiveModelsMap.set(`openai/${model}`, info);
-          return info;
-        }
-      })());
-    }
-  }
-
-  // 4. Test OpenRouter Models
-  if (openrouterKey && openrouterKey.trim().length > 0) {
-    const orModels = [
-      "x-ai/grok-2-vision-1212",
-      "openai/gpt-4o",
-      "openai/gpt-4o-mini",
-      "qwen/qwen-2.5-vl-72b-instruct",
-      "meta-llama/llama-3.2-11b-vision-instruct",
-    ];
-    for (const model of orModels) {
-      checkPromises.push((async () => {
-        const t0 = Date.now();
-        try {
-          const res = await withTimeout(
-            fetch("https://openrouter.ai/api/v1/chat/completions", {
-              method: "POST",
-              headers: {
-                "Authorization": `Bearer ${openrouterKey.trim()}`,
-                "Content-Type": "application/json",
-                "HTTP-Referer": "https://ai.studio",
-                "X-Title": "YKS Koçluk AI",
-              },
-              body: JSON.stringify({ model, messages: [{ role: "user", content: "test" }], max_tokens: 5 }),
-            }),
-            5000,
-            `OpenRouter (${model}) 5sn zaman aşımı`
-          );
-          const latency = Date.now() - t0;
-          const json: any = await res.json().catch(() => ({}));
-          // HTTP 200 or res.ok is strictly successful
-          const isOk = res.ok || res.status === 200;
-          const isRateLimited = res.status === 429;
-          const info: LiveModelHealthInfo = {
-            model: `openrouter/${model}`,
-            provider: 'openrouter',
-            status: isOk ? 'ok' : (isRateLimited ? 'rate_limited' : 'error'),
-            isAlive: isOk,
-            latencyMs: latency,
-            lastCheckedAt: now,
-            message: isOk ? 'Canlı ve Hazır' : (json?.error?.message || `HTTP ${res.status}`)
-          };
-          verifiedLiveModelsMap.set(`openrouter/${model}`, info);
-          return info;
-        } catch (err: any) {
-          const info: LiveModelHealthInfo = {
-            model: `openrouter/${model}`,
-            provider: 'openrouter',
-            status: 'error',
-            isAlive: false,
-            latencyMs: Date.now() - t0,
-            lastCheckedAt: now,
-            message: err?.message || 'OpenRouter Erişilemiyor'
-          };
-          verifiedLiveModelsMap.set(`openrouter/${model}`, info);
-          return info;
-        }
-      })());
-    }
-  }
-
-  // 5. Test Groq Models
-  if (groqKey && groqKey.trim().length > 0) {
-    const groqModels = [
-      "qwen/qwen3.8-27b",
-      "openai/gpt-oss-120b",
-      "openai/gpt-oss-20b",
-    ];
-    for (const model of groqModels) {
-      checkPromises.push((async () => {
-        const t0 = Date.now();
-        try {
-          const res = await withTimeout(
-            fetch("https://api.groq.com/openai/v1/chat/completions", {
-              method: "POST",
-              headers: { "Authorization": `Bearer ${groqKey.trim()}`, "Content-Type": "application/json" },
-              body: JSON.stringify({ model, messages: [{ role: "user", content: "test" }], max_tokens: 5 }),
-            }),
-            5000,
-            `Groq (${model}) 5sn zaman aşımı`
-          );
-          const latency = Date.now() - t0;
-          const json: any = await res.json().catch(() => ({}));
-          // HTTP 200 or res.ok is strictly successful
-          const isOk = res.ok || res.status === 200;
-          const isRateLimited = res.status === 429;
-          const info: LiveModelHealthInfo = {
-            model: `groq/${model}`,
-            provider: 'groq',
-            status: isOk ? 'ok' : (isRateLimited ? 'rate_limited' : 'error'),
-            isAlive: isOk,
-            latencyMs: latency,
-            lastCheckedAt: now,
-            message: isOk ? 'Canlı ve Hazır' : (json?.error?.message || `HTTP ${res.status}`)
-          };
-          verifiedLiveModelsMap.set(`groq/${model}`, info);
-          return info;
-        } catch (err: any) {
-          const info: LiveModelHealthInfo = {
-            model: `groq/${model}`,
-            provider: 'groq',
-            status: 'error',
-            isAlive: false,
-            latencyMs: Date.now() - t0,
-            lastCheckedAt: now,
-            message: err?.message || 'Groq Erişilemiyor'
-          };
-          verifiedLiveModelsMap.set(`groq/${model}`, info);
           return info;
         }
       })());
@@ -2759,19 +2547,19 @@ async function executeVisionWithFallback(
   let allRateLimited = true;
 
   // 1. Google Gemini Flash & Pro Models (Active & non-cooling across all API Key slots)
-  const candidateClients = getGeminiCandidateClients();
-  if (candidateClients.length > 0) {
+  const candidateSlots = getGeminiCandidateClients();
+  if (candidateSlots.length > 0) {
     const { activeList, coolingCount } = getSortedModelList(FLASH_VISION_CASCADE);
 
     for (let i = 0; i < activeList.length; i++) {
       const modelName = activeList[i];
       let modelSuccess = false;
 
-      for (let k = 0; k < candidateClients.length; k++) {
-        const client = candidateClients[k];
+      for (let k = 0; k < candidateSlots.length; k++) {
+        const { client, maskedKey } = candidateSlots[k];
         try {
           console.log(
-            `[Gemini Flash Vision] Deneniyor: ${modelName} (Model ${i + 1}/${activeList.length}, Anahtar ${k + 1}/${candidateClients.length})...`
+            `[Gemini Flash Vision] Deneniyor: ${modelName} (Model ${i + 1}/${activeList.length}, Anahtar ${maskedKey} [${k + 1}/${candidateSlots.length}])...`
           );
           const response = await withTimeout(
             client.models.generateContent({
@@ -2805,13 +2593,13 @@ async function executeVisionWithFallback(
 
           const responseText = response?.text || "";
           if (responseText && responseText.trim().length > 0) {
-            console.log(`[Gemini Flash Vision] ✅ Başarılı model: ${modelName}`);
+            console.log(`[Gemini Flash Vision] ✅ Başarılı model: ${modelName} (Anahtar: ${maskedKey})`);
             setModelWorking(modelName);
             setGeminiKeySuccess(client);
             addSystemLog({
               level: "success",
               source: "gemini",
-              message: `✅ Görsel soru analizi başarılı: ${modelName} yanıt verdi.`,
+              message: `✅ Görsel soru analizi başarılı: ${modelName} (${maskedKey}) yanıt verdi.`,
               model: modelName,
             });
             return { text: responseText, usedModel: modelName };
@@ -2830,7 +2618,7 @@ async function executeVisionWithFallback(
           if (isQuota) {
             setGeminiKeyCooldown(client, 60000); // Cooldown this key for 60s
             console.warn(
-              `[Gemini Key Quota] ⚠️ Anahtar için 429 Kota Sınırı. Sıradaki anahtar deneniyor...`
+              `[Gemini Key Quota] ⚠️ Anahtar (${maskedKey}) için 429 Kota Sınırı. Sıradaki anahtara geçiliyor...`
             );
           } else {
             allRateLimited = false;
@@ -2872,16 +2660,16 @@ async function executeTextWithFallback(
   const contents: any = params.parts && params.parts.length > 0 ? [{ parts: params.parts }] : (params.prompt || "");
   const effectiveTimeout = params.timeoutMs || 30000;
 
-  const candidateClients = getGeminiCandidateClients();
-  const clientsToTry = candidateClients.length > 0 ? candidateClients : [ai];
+  const candidateSlots = getGeminiCandidateClients();
+  const slotsToTry = candidateSlots.length > 0 ? candidateSlots : (ai ? [{ client: ai, maskedKey: "Default" }] : []);
   const { activeList } = getSortedModelList(FLASH_TEXT_CASCADE);
 
   for (let i = 0; i < activeList.length; i++) {
     const modelName = activeList[i];
-    for (let k = 0; k < clientsToTry.length; k++) {
-      const client = clientsToTry[k];
+    for (let k = 0; k < slotsToTry.length; k++) {
+      const { client, maskedKey } = slotsToTry[k];
       try {
-        console.log(`[Gemini Flash Text] Deneniyor: ${modelName} (Model ${i + 1}/${activeList.length}, Anahtar ${k + 1}/${clientsToTry.length})...`);
+        console.log(`[Gemini Flash Text] Deneniyor: ${modelName} (Model ${i + 1}/${activeList.length}, Anahtar ${maskedKey} [${k + 1}/${slotsToTry.length}])...`);
         const response = await withTimeout(
           client.models.generateContent({
             model: modelName,
@@ -2901,7 +2689,7 @@ async function executeTextWithFallback(
         if (responseText && responseText.trim().length > 0) {
           setModelWorking(modelName);
           setGeminiKeySuccess(client);
-          console.log(`[Gemini Flash Text] ✅ Başarılı model: ${modelName}`);
+          console.log(`[Gemini Flash Text] ✅ Başarılı model: ${modelName} (Anahtar: ${maskedKey})`);
           return { text: responseText, usedModel: modelName };
         }
       } catch (err: any) {
@@ -3770,7 +3558,10 @@ Sana verilen bu test / sınav sayfası görselindeki (${sinavTuru}) BASILI GERÇ
    - Sayfada yer alan tüm basılı soru numaralarını (1, 2, 3...) bul ve her basılı soru için eksiksiz bir JSON nesnesi üret.
    - Öğrencinin üzerine işaretleme yaptığı soruları öncelikle tespit et.
    - Öğrenci sayfadaki soruları hiç çözmemiş veya boş bırakmış olsa dahi; sayfada basılı tüm soruları tespit et, çöz ve 'isaretlenenSik': "Boş", 'ogrenciCevabi': "Boş", 'durum': "bos", 'dogruMu': false olarak listele!
-2. Soru Numarası: Fotoğrafta basılı olan orijinal soru numarasını oku (örn: 20).
+2. Soru Numarası ve Sütun Sırası (ÇOK ÖNEMLİ):
+   - Fotoğrafta basılı olan GERÇEK ORİJİNAL SORU NUMARASINI oku (örn: Soru başında "9." yazıyorsa 'soruNo': 9; "10." yazıyorsa 'soruNo': 10 yaz).
+   - ASLA soruları sayfa koordinatına göre kafana göre 1, 2, 3 diye numaralandırma! Soru kağıdındaki basılı sayıyı birebir kullan.
+   - Sayfada 2 sütun varsa: Önce sol sütunu yukarıdan aşağıya (örn: Soru 8, Soru 9), ardından sağ sütunu yukarıdan aşağıya (örn: Soru 10, Soru 11) sırasıyla incele.
 3. Soru Türü (soruTuru): 
    - "coktan_secmeli": A, B, C, D, E gibi seçenekleri olan sorular.
    - "bosluk_doldurma": Cümle veya tablo içindeki boşlukları doldurma soruları (şık harfleri yoktur).
@@ -3783,18 +3574,19 @@ Sana verilen bu test / sınav sayfası görselindeki (${sinavTuru}) BASILI GERÇ
    - "kazanimKodu": Gerçek MEB kazanım kodu (Örn: "MAT.10.1.2", "FIZ.11.2.1", "KIM.10.3.1", "BIY.11.1.4").
    - "kazanimAciklama": Sorunun ölçtüğü tam MEB kazanım açıklaması.
 8. Çözüm Detayı (cozumDetayi): Sorunun tam, adım adım matematiksel/mantıksal çözümü (LaTeX formüllerini JSON içinde geçerli olması için gerekirse çift ters çizgi \\\\ ile yaz).
-9. İŞARETLENEN ŞIKKI BULMA VE TESPİT ETME TALİMATI (ÇOK DİKKATLİ İNCELE):
-   - Öğrencinin soru üzerinde işaretlediği şıkkı tespit ederken şu işaretleme türlerini çok dikkatli ara:
-     * DAİRE / YUVARLAK / ELİPS İÇİNE ALMA VEYA KUTULAMA (ÇOK ÖNEMLİ):
-       - Öğrenci SADECE şık harfini (A, B, C, D veya E) daireye almış olabilir.
-       - YA DA ŞIKKIN TAMAMINI (şık harfiyle birlikte tüm seçenek metnini, formülünü, sayısını veya satırı komple) daire/elips/oval içine almış veya çerçevelemiş/kutulamış olabilir. Her iki durumda da o şıkkı kesinlikle İŞARETLENMİŞ olarak kabul et ve ilgili şık harfini 'isaretlenenSik' olarak yaz.
-     * ŞIK HARFİNİ BOYAMA VEYA KARALAMA: Şık harfinin, parantezinin veya yuvarlağının içi kurşun/tükenmez kalemle doldurulmuş, karalanmış veya üzeri belirgin çizilmişse o şık seçilmiştir.
-     * TİK İŞARETİ (✓): Şık harfinin veya şık metninin hemen yanına, üstüne, soluna veya sağına konulan onay/tik işareti o şıkkın seçildiğini gösterir.
-     * ALTINI ÇİZME VEYA VURGULAMA: Bir şık metninin veya harfinin altı çizilmiş, fosforlu/kalemle vurgulanmış ve başka işaretleme yoksa o şık seçilmiştir.
-     * YANINA EL YAZISIYLA YAZMA: Soru kenarına veya yanına öğrenci açıkça tek bir şık harfi yazmışsa (Örn: "Cevap C", "D", "E şıkkı") o şık seçilmiştir.
-   - ELENEN / ÜSTÜ ÇİZİLEN ŞIKLARA DİKKAT ET (BU ŞIKLARI SEÇİLDİ SANMA):
-     * Öğrenci bir veya birden fazla şıkkı elemek için üstüne düz çizgi (—) veya çarpı (X) atmış olabilir. Üstü çizilerek elenen şık işaretlenen şık DEĞİLDİR! Asıl işaretlenen şık; elenmeyen, tamamı veya harfi daire/elips içine alınan, boyanan veya tik atılan şıktır.
-   - ÖĞRENCİ SORUYU ÇÖZMEMİŞ / BOŞ BIRAKMIŞSA (HİÇBİR İŞARETLEME YOKSA):
+9. İŞARETLENEN ŞIKKI BULMA VE TESPİT ETME TALİMATI (YALNIZCA DAİRE İÇİNE ALMA VE BOYAMA):
+   - YALNIZCA ÖĞRENCİNİN KULLANDIĞI KALEMLE DAİRE / ELİPS İÇİNE ALDIĞI VEYA İÇİNİ KARALADIĞI/BOYADIĞI ŞIKLARI İŞARETLENMİŞ SAY!
+   - KESİNLİKLE ŞU ÜÇ İŞARETLEME TÜRÜNÜ 'isaretlenenSik' OLARAK KABUL ET:
+     * 1) ŞIK HARFİNİ DAİREYE ALMA: Öğrencinin şık harfini (A, B, C, D veya E) daire/elips/oval veya kutucuk içine alması.
+     * 2) ŞIKKIN VEYA SATIRIN TAMAMINI DAİREYE ALMA: Öğrencinin şık harfiyle birlikte tüm seçenek metnini, kelimelerini veya satırını komple daire/elips/oval içine alması veya çerçevelemesi.
+     * 3) ŞIK HARFİNİ BOYAMA / İÇİNİ DOLDURMA: Şık harfinin veya yuvarlağının içinin karalanmış/doldurulmuş olması.
+   - ⚠️ KESİNLİKLE İŞARETLEME SAYILMAYACAK DURUMLAR (BOŞ KABUL EDİLECEK DURUMLAR):
+     * Öğrencinin soru kenarına, marjine, soru numarasının yanına veya boşluğa yazdığı el yazısı harf veya notlar (Örn: Soru 9'un yanında yazan kırmızı/siyah "B", "C", "+", "-" notları KESİNLİKLE İŞARETLEME DEĞİLDİR! Bunlar borç/taslak notudur. Şıkların kendisi daire içine alınmamışsa soru KESİNLİKLE "Boş"tur!).
+     * Paragraf veya soru kökü içindeki kelimelerin altının çizilmesi şık işaretlemesi değildir.
+     * Şık harflerinden veya şık metinlerinden HİÇBİRİ daire/elips içine alınmamışsa 'isaretlenenSik': "Boş", 'ogrenciCevabi': "Boş", 'durum': "bos", 'dogruMu': false OLARAK YAZILMALIDIR!
+   - ELENEN / ÜSTÜ ÇİZİLEN ŞIKLARA DİKKAT ET:
+     * Öğrenci bir veya birden fazla şıkkı elemek için üstüne çizgi (—) veya çarpı (X) atmış olabilir. Üstü çizilerek elenen şıklar işaretlenen şık DEĞİLDİR!
+   - ÖĞRENCİ SORUYU ÇÖZMEMİŞ / BOŞ BIRAKMIŞSA (HİÇBİR ŞIK DAİRE İÇİNE ALINMAMIŞSA):
      "isaretlenenSik": "Boş", "ogrenciCevabi": "Boş", "durum": "bos", "dogruMu": false
    - ÖĞRENCİ DOĞRU ŞIKKI İŞARETLEMİŞSE:
      "isaretlenenSik": işaretlenen harf, "ogrenciCevabi": işaretlenen harf, "durum": "dogru", "dogruMu": true
@@ -3861,10 +3653,10 @@ Yanıt formatı SADECE geçerli bir JSON dizisi olmalıdır:
         const focusedPrompt = `
 DİKKAT: Bu sınav sayfası görselinde (${sinavTuru}) basılı test soruları bulunmaktadır.
 İlk taramada soru bulunamadı olarak algılandı. Sayfayı çok daha dikkatli incele:
-1. Sayfadaki soru numaralarını (1, 2, 3, 4, 5...) ve soru metinlerini bul.
-2. Sayfada öğrencinin kurşun/tükenmez/kırmızı/mavi kalemle yaptığı TİKLER (✓), ÇARPI, ŞIK HARFİNİ VEYA ŞIKKIN TAMAMINI DAİRE / ELİPS İÇİNE ALMA, ŞIKKI KUTULAMA, ALTINI ÇİZME veya EL YAZISI ÇÖZÜMLERİ oku.
-3. Öğrenci işaretlemişse 'isaretlenenSik' ve 'ogrenciCevabi' olarak oku.
-4. Hiç işaretlenmemiş sorular için 'isaretlenenSik': "Boş", 'ogrenciCevabi': "Boş", 'durum': "bos", 'dogruMu': false yaz.
+1. Sayfadaki basılı soru numaralarını (1, 2, 3, 4, 5...) ve soru metinlerini bul.
+2. Sayfada öğrencinin YALNIZCA ŞIK HARFİNİ VEYA ŞIKKIN/SATIRIN TAMAMINI DAİRE / ELİPS İÇİNE ALMA VEYA BOYAMA işaretlemelerini oku (kenar notlarını işaretleme sayma!).
+3. Yalnızca şık harfi veya şık metni daire içine alınmışsa 'isaretlenenSik' ve 'ogrenciCevabi' olarak oku.
+4. Hiçbir şık daire içine alınmamışsa 'isaretlenenSik': "Boş", 'ogrenciCevabi': "Boş", 'durum': "bos", 'dogruMu': false yaz.
 5. Soruları çöz, doğru cevabı 'dogruCevap' alanına yaz.
 6. Yanıt olarak SADECE geçerli bir JSON dizisi [...] döndür.
 `;
@@ -4546,7 +4338,10 @@ KRİTİK KURALLAR:
    - Sayfada kaç adet tam basılı soru varsa, JSON dizisinde TAM O KADAR soru objesi döndür!
    - Öğrencinin üzerine işaretleme yaptığı, kurşun/tükenmez/kırmızı/mavi kalemle tik (✓) koyduğu, daire içine aldığı, şıkkı karaladığı soruları öncelikle tespit et.
    - ÖĞRENCİ ÇÖZMEMİŞ VEYA BOŞ BIRAKMIŞ OLSA BİLE: Öğrencinin sayfadaki soruları çözmemiş veya boş bırakmış olması durumunda DA SAYFADAKİ TÜM BASILI SORULARI ÇIKAR VE ÇÖZ! Öğrencinin işaretlediği şıkkı "Boş" olarak kaydet ('isaretlenenSik': "Boş", 'ogrenciCevabi': "Boş", 'durum': "bos", 'dogruMu': false), doğru cevabı, MEB kazanımını, kutu koordinatlarını ve detaylı çözümü eksiksiz yaz.
-3. Soru Numarası: Fotoğrafta basılı olan orijinal soru numarasını oku (örn: 20).
+3. Soru Numarası ve Sütun Sırası (ÇOK ÖNEMLİ):
+   - Fotoğrafta basılı olan GERÇEK ORİJİNAL SORU NUMARASINI oku (örn: Soru başında "9." yazıyorsa 'soruNo': 9; "10." yazıyorsa 'soruNo': 10 yaz).
+   - ASLA soruları sayfa koordinatına göre kafana göre 1, 2, 3 diye numaralandırma! Soru kağıdındaki basılı sayıyı birebir kullan.
+   - Sayfada 2 sütun varsa: Önce sol sütunu yukarıdan aşağıya (örn: Soru 8, Soru 9), ardından sağ sütunu yukarıdan aşağıya (örn: Soru 10, Soru 11) sırasıyla incele.
 4. Soru Türü (soruTuru): "coktan_secmeli", "bosluk_doldurma", "acik_uclu", "dogru_yanlis".
 5. Ders: Tam ders adı (Örn: "Fizik (AYT)", "Kimya (AYT)", "Biyoloji (AYT)", "Matematik (TYT)", "Türkçe (TYT)", "Geometri", "Tarih-1", "Coğrafya-1").
 6. Ünite: Sorunun ait olduğu MEB ana ünitesi.
@@ -4555,18 +4350,19 @@ KRİTİK KURALLAR:
    - "kazanimKodu": Gerçek MEB kazanım kodu (Örn: "MAT.10.1.2", "FIZ.11.2.1", "KIM.10.3.1", "BIY.11.1.4").
    - "kazanimAciklama": Sorunun ölçtüğü tam MEB kazanım açıklaması.
 9. Çözüm Detayı (cozumDetayi): Sorunun tam, adım adım matematiksel/mantıksal çözümü (LaTeX formüllerini JSON için çift ters çizgi \\\\ ile yaz).
-10. İŞARETLENEN ŞIKKI BULMA VE TESPİT ETME TALİMATI (ÇOK DİKKATLİ İNCELE):
-    - Öğrencinin soru üzerinde işaretlediği şıkkı tespit ederken şu işaretleme türlerini çok dikkatli ara:
-      * DAİRE / YUVARLAK / ELİPS İÇİNE ALMA VEYA KUTULAMA (ÇOK ÖNEMLİ):
-        - Öğrenci SADECE şık harfini (A, B, C, D veya E) daireye almış olabilir.
-        - YA DA ŞIKKIN TAMAMINI (şık harfiyle birlikte tüm seçenek metnini, formülünü, sayısını veya satırı komple) daire/elips/oval içine almış veya çerçevelemiş/kutulamış olabilir. Her iki durumda da o şıkkı kesinlikle İŞARETLENMİŞ olarak kabul et ve ilgili şık harfini 'isaretlenenSik' olarak yaz.
-      * ŞIK HARFİNİ BOYAMA VEYA KARALAMA: Şık harfinin, parantezinin veya yuvarlağının içi kurşun/tükenmez kalemle doldurulmuş, karalanmış veya üzeri belirgin çizilmişse o şık seçilmiştir.
-      * TİK İŞARETİ (✓): Şık harfinin veya şık metninin hemen yanına, üstüne, soluna veya sağına konulan onay/tik işareti o şıkkın seçildiğini gösterir.
-      * ALTINI ÇİZME VEYA VURGULAMA: Bir şık metninin veya harfinin altı çizilmiş, fosforlu/kalemle vurgulanmış ve başka işaretleme yoksa o şık seçilmiştir.
-      * YANINA EL YAZISIYLA YAZMA: Soru kenarına veya yanına öğrenci açıkça tek bir şık harfi yazmışsa (Örn: "Cevap C", "D", "E şıkkı") o şık seçilmiştir.
-    - ELENEN / ÜSTÜ ÇİZİLEN ŞIKLARA DİKKAT ET (BU ŞIKLARI SEÇİLDİ SANMA):
-      * Öğrenci bir veya birden fazla şıkkı elemek için üstüne düz çizgi (—) veya çarpı (X) atmış olabilir. Üstü çizilerek elenen şıklar işaretlenen şık DEĞİLDİR! Asıl işaretlenen şık; elenmeyen, tamamı veya harfi daire/elips içine alınan, boyanan veya tik atılan şıktır.
-    - ÖĞRENCİ SORUYU ÇÖZMEMİŞ / BOŞ BIRAKMIŞSA (HİÇBİR İŞARETLEME YOKSA):
+10. İŞARETLENEN ŞIKKI BULMA VE TESPİT ETME TALİMATI (YALNIZCA DAİRE İÇİNE ALMA VE BOYAMA):
+    - YALNIZCA ÖĞRENCİNİN KULLANDIĞI KALEMLE DAİRE / ELİPS İÇİNE ALDIĞI VEYA İÇİNİ KARALADIĞI/BOYADIĞI ŞIKLARI İŞARETLENMİŞ SAY!
+    - KESİNLİKLE ŞU ÜÇ İŞARETLEME TÜRÜNÜ 'isaretlenenSik' OLARAK KABUL ET:
+      * 1) ŞIK HARFİNİ DAİREYE ALMA: Öğrencinin şık harfini (A, B, C, D veya E) daire/elips/oval veya kutucuk içine alması.
+      * 2) ŞIKKIN VEYA SATIRIN TAMAMINI DAİREYE ALMA: Öğrencinin şık harfiyle birlikte tüm seçenek metnini, kelimelerini veya satırını komple daire/elips/oval içine alması veya çerçevelemesi.
+      * 3) ŞIK HARFİNİ BOYAMA / İÇİNİ DOLDURMA: Şık harfinin veya yuvarlağının içinin karalanmış/doldurulmuş olması.
+    - ⚠️ KESİNLİKLE İŞARETLEME SAYILMAYACAK DURUMLAR (BOŞ KABUL EDİLECEK DURUMLAR):
+      * Öğrencinin soru kenarına, marjine, soru numarasının yanına veya boşluğa yazdığı el yazısı harf veya notlar (Örn: Soru 9'un yanında yazan kırmızı/siyah "B", "C", "+", "-" notları KESİNLİKLE İŞARETLEME DEĞİLDİR! Bunlar borç/taslak notudur. Şıkların kendisi daire içine alınmamışsa soru KESİNLİKLE "Boş"tur!).
+      * Paragraf veya soru kökü içindeki kelimelerin altının çizilmesi şık işaretlemesi değildir.
+      * Şık harflerinden veya şık metinlerinden HİÇBİRİ daire/elips içine alınmamışsa 'isaretlenenSik': "Boş", 'ogrenciCevabi': "Boş", 'durum': "bos", 'dogruMu': false OLARAK YAZILMALIDIR!
+    - ELENEN / ÜSTÜ ÇİZİLEN ŞIKLARA DİKKAT ET:
+      * Öğrenci bir veya birden fazla şıkkı elemek için üstüne çizgi (—) veya çarpı (X) atmış olabilir. Üstü çizilerek elenen şıklar işaretlenen şık DEĞİLDİR!
+    - ÖĞRENCİ SORUYU ÇÖZMEMİŞ / BOŞ BIRAKMIŞSA (HİÇBİR ŞIK DAİRE İÇİNE ALINMAMIŞSA):
       "isaretlenenSik": "Boş", "ogrenciCevabi": "Boş", "durum": "bos", "dogruMu": false
     - ÖĞRENCİ DOĞRU ŞIKKI İŞARETLEMİŞSE:
       "isaretlenenSik": işaretlenen harf, "ogrenciCevabi": işaretlenen harf, "durum": "dogru", "dogruMu": true
@@ -4644,10 +4440,10 @@ Yanıt formatı SADECE geçerli bir JSON dizisi olmalıdır:
               const focusedPrompt = `
 DİKKAT: Bu sınav sayfası fotoğrafında (Sayfa ${pageIdx + 1}, ${job.sinavTuru}) basılı test soruları bulunmaktadır.
 İlk taramada soru bulunamadı olarak algılandı. Sayfayı çok daha dikkatli incele:
-1. Sayfadaki soru numaralarını (1, 2, 3, 4, 5...) ve soru metinlerini bul.
-2. Sayfada öğrencinin kurşun/tükenmez/kırmızı/mavi kalemle yaptığı TİKLER (✓), ÇARPI, ŞIK HARFİNİ VEYA ŞIKKIN TAMAMINI DAİRE / ELİPS İÇİNE ALMA, ŞIKKI KUTULAMA, ALTINI ÇİZME veya EL YAZISI ÇÖZÜMLERİ oku.
-3. Öğrenci işaretlemişse 'isaretlenenSik' ve 'ogrenciCevabi' olarak oku.
-4. Hiç işaretlenmemiş sorular için 'isaretlenenSik': "Boş", 'ogrenciCevabi': "Boş", 'durum': "bos", 'dogruMu': false yaz.
+1. Sayfadaki basılı soru numaralarını (1, 2, 3, 4, 5...) ve soru metinlerini bul.
+2. Sayfada öğrencinin YALNIZCA ŞIK HARFİNİ VEYA ŞIKKIN/SATIRIN TAMAMINI DAİRE / ELİPS İÇİNE ALMA VEYA BOYAMA işaretlemelerini oku (kenar notlarını işaretleme sayma!).
+3. Yalnızca şık harfi veya şık metni daire içine alınmışsa 'isaretlenenSik' ve 'ogrenciCevabi' olarak oku.
+4. Hiçbir şık daire içine alınmamışsa 'isaretlenenSik': "Boş", 'ogrenciCevabi': "Boş", 'durum': "bos", 'dogruMu': false yaz.
 5. Soruları çöz, doğru cevabı 'dogruCevap' alanına yaz.
 6. Yanıt olarak SADECE geçerli bir JSON dizisi [...] döndür.
 `;
@@ -5499,25 +5295,29 @@ Sana verilen bu test / sınav sayfası görselindeki (${sinavTuru}, Sayfa ${page
    - Sayfada kaç adet basılı tam soru varsa, hepsi için birer JSON nesnesi üret!
    - Öğrencinin üzerine işaretleme yaptığı veya el yazısıyla işlem yaptığı soruları öncelikle tespit et.
    - ÖĞRENCİ ÇÖZMEMİŞ VEYA BOŞ BIRAKMIŞ OLSA BİLE: Sayfadaki tüm basılı soruları tespit et, çöz ve 'isaretlenenSik': "Boş", 'ogrenciCevabi': "Boş", 'durum': "bos", 'dogruMu': false olarak listele!
-2. Soru Numarası: Fotoğrafta basılı olan orijinal soru numarasını oku (örn: 20).
+2. Soru Numarası ve Sütun Sırası (ÇOK ÖNEMLİ):
+   - Fotoğrafta basılı olan GERÇEK ORİJİNAL SORU NUMARASINI oku (örn: Soru başında "9." yazıyorsa 'soruNo': 9; "10." yazıyorsa 'soruNo': 10 yaz).
+   - ASLA soruları sayfa koordinatına göre kafana göre 1, 2, 3 diye numaralandırma! Soru kağıdındaki basılı sayıyı birebir kullan.
+   - Sayfada 2 sütun varsa: Önce sol sütunu yukarıdan aşağıya (örn: Soru 8, Soru 9), ardından sağ sütunu yukarıdan aşağıya (örn: Soru 10, Soru 11) sırasıyla incele.
 3. Soru Türü (soruTuru): "coktan_secmeli", "bosluk_doldurma", "acik_uclu", "dogru_yanlis".
 4. Ders: Tam ders adı (Örn: "Matematik (AYT)", "Matematik (TYT)", "Fizik (AYT)", "Kimya (AYT)", "Biyoloji (AYT)", "Türkçe (TYT)", "Tarih", "Geometri").
 5. Ünite: Sorunun ait olduğu MEB ana ünitesi.
 6. Konu: Sorunun alt konu başlığı.
 7. MEB Kazanım Kodu ve Açıklaması: "kazanimKodu", "kazanimAciklama".
 8. Çözüm Detayı (cozumDetayi): Sorunun tam, adım adım çözümü.
-9. İŞARETLENEN ŞIKKI BULMA VE TESPİT ETME TALİMATI (ÇOK DİKKATLİ İNCELE):
-   - Öğrencinin soru üzerinde işaretlediği şıkkı tespit ederken şu işaretleme türlerini çok dikkatli ara:
-     * DAİRE / YUVARLAK / ELİPS İÇİNE ALMA VEYA KUTULAMA (ÇOK ÖNEMLİ):
-       - Öğrenci SADECE şık harfini (A, B, C, D veya E) daireye almış olabilir.
-       - YA DA ŞIKKIN TAMAMINI (şık harfiyle birlikte tüm seçenek metnini, formülünü, sayısını veya satırı komple) daire/elips/oval içine almış veya çerçevelemiş/kutulamış olabilir. Her iki durumda da o şıkkı kesinlikle İŞARETLENMİŞ olarak kabul et ve ilgili şık harfini 'isaretlenenSik' olarak yaz.
-     * ŞIK HARFİNİ BOYAMA VEYA KARALAMA: Şık harfinin, parantezinin veya yuvarlağının içi kurşun/tükenmez kalemle doldurulmuş, karalanmış veya üzeri belirgin çizilmişse o şık seçilmiştir.
-     * TİK İŞARETİ (✓): Şık harfinin veya şık metninin hemen yanına, üstüne, soluna veya sağına konulan onay/tik işareti o şıkkın seçildiğini gösterir.
-     * ALTINI ÇİZME VEYA VURGULAMA: Bir şık metninin veya harfinin altı çizilmiş, fosforlu/kalemle vurgulanmış ve başka işaretleme yoksa o şık seçilmiştir.
-     * YANINA EL YAZISIYLA YAZMA: Soru kenarına veya yanına öğrenci açıkça tek bir şık harfi yazmışsa (Örn: "Cevap C", "D", "E şıkkı") o şık seçilmiştir.
-   - ELENEN / ÜSTÜ ÇİZİLEN ŞIKLARA DİKKAT ET (BU ŞIKLARI SEÇİLDİ SANMA):
-     * Öğrenci bir veya birden fazla şıkkı elemek için üstüne düz çizgi (—) veya çarpı (X) atmış olabilir. Üstü çizilerek elenen şıklar işaretlenen şık DEĞİLDİR! Asıl işaretlenen şık; elenmeyen, tamamı veya harfi daire/elips içine alınan, boyanan veya tik atılan şıktır.
-   - ÖĞRENCİ SORUYU ÇÖZMEMİŞ / BOŞ BIRAKMIŞSA (HİÇBİR İŞARETLEME YOKSA):
+9. İŞARETLENEN ŞIKKI BULMA VE TESPİT ETME TALİMATI (YALNIZCA DAİRE İÇİNE ALMA VE BOYAMA):
+   - YALNIZCA ÖĞRENCİNİN KULLANDIĞI KALEMLE DAİRE / ELİPS İÇİNE ALDIĞI VEYA İÇİNİ KARALADIĞI/BOYADIĞI ŞIKLARI İŞARETLENMİŞ SAY!
+   - KESİNLİKLE ŞU ÜÇ İŞARETLEME TÜRÜNÜ 'isaretlenenSik' OLARAK KABUL ET:
+     * 1) ŞIK HARFİNİ DAİREYE ALMA: Öğrencinin şık harfini (A, B, C, D veya E) daire/elips/oval veya kutucuk içine alması.
+     * 2) ŞIKKIN VEYA SATIRIN TAMAMINI DAİREYE ALMA: Öğrencinin şık harfiyle birlikte tüm seçenek metnini, kelimelerini veya satırını komple daire/elips/oval içine alması veya çerçevelemesi.
+     * 3) ŞIK HARFİNİ BOYAMA / İÇİNİ DOLDURMA: Şık harfinin veya yuvarlağının içinin karalanmış/doldurulmuş olması.
+   - ⚠️ KESİNLİKLE İŞARETLEME SAYILMAYACAK DURUMLAR (BOŞ KABUL EDİLECEK DURUMLAR):
+     * Öğrencinin soru kenarına, marjine, soru numarasının yanına veya boşluğa yazdığı el yazısı harf veya notlar (Örn: Soru 9'un yanında yazan kırmızı/siyah "B", "C", "+", "-" notları KESİNLİKLE İŞARETLEME DEĞİLDİR! Bunlar borç/taslak notudur. Şıkların kendisi daire içine alınmamışsa soru KESİNLİKLE "Boş"tur!).
+     * Paragraf veya soru kökü içindeki kelimelerin altının çizilmesi şık işaretlemesi değildir.
+     * Şık harflerinden veya şık metinlerinden HİÇBİRİ daire/elips içine alınmamışsa 'isaretlenenSik': "Boş", 'ogrenciCevabi': "Boş", 'durum': "bos", 'dogruMu': false OLARAK YAZILMALIDIR!
+   - ELENEN / ÜSTÜ ÇİZİLEN ŞIKLARA DİKKAT ET:
+     * Öğrenci bir veya birden fazla şıkkı elemek için üstüne çizgi (—) veya çarpı (X) atmış olabilir. Üstü çizilerek elenen şıklar işaretlenen şık DEĞİLDİR!
+   - ÖĞRENCİ SORUYU ÇÖZMEMİŞ / BOŞ BIRAKMIŞSA (HİÇBİR ŞIK DAİRE İÇİNE ALINMAMIŞSA):
      "isaretlenenSik": "Boş", "ogrenciCevabi": "Boş", "durum": "bos", "dogruMu": false
    - ÖĞRENCİ DOĞRU ŞIKKI İŞARETLEMİŞSE:
      "isaretlenenSik": işaretlenen harf, "ogrenciCevabi": işaretlenen harf, "durum": "dogru", "dogruMu": true

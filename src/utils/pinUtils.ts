@@ -24,8 +24,8 @@ export function ensureAllStudentsHavePins(students: any[]): Student[] {
   
   return students.map((std, index) => {
     let pin = std.pinCode;
-    // Eğer PIN yoksa veya 6 haneli değilse veya çakışıyorsa yenisini ata
-    if (!pin || typeof pin !== 'string' || pin.length !== 6 || existingPins.includes(pin)) {
+    // Eğer PIN yoksa veya geçerli bir PIN değilse (4-8 hane arası rakam olmalı) veya çakışıyorsa yenisini ata
+    if (!pin || typeof pin !== 'string' || pin.trim().length < 4 || pin.trim().length > 8 || !/^\d+$/.test(pin.trim()) || existingPins.includes(pin)) {
       // Örnek seedler için sabit hoş numaralar
       const defaultPins = ['582194', '739401', '241893', '615820', '839215', '472091'];
       const candidate = defaultPins[index] || generateRandom6DigitPin(existingPins);

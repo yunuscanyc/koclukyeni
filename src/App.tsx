@@ -88,13 +88,23 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<StudentProfileTab>('genel');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
-  // Authentication State
+  // Authentication State with multi-user isolation support (different tabs can have different students)
   const [authSession, setAuthSession] = useState<AuthSession | null>(() => {
     try {
-      const saved = localStorage.getItem('yks_kocluk_auth_session_v1');
-      if (saved) return JSON.parse(saved);
+      // Check sessionStorage first (tab-specific isolation)
+      const sessionSaved = sessionStorage.getItem('yks_kocluk_auth_session_v1');
+      if (sessionSaved) return JSON.parse(sessionSaved);
+
+      // Check localStorage only as a fallback for Coach
+      const localSaved = localStorage.getItem('yks_kocluk_auth_session_v1');
+      if (localSaved) {
+        const parsed = JSON.parse(localSaved);
+        if (parsed && parsed.role === 'coach') {
+          return parsed;
+        }
+      }
     } catch {}
-    return null; // Sayfa açıldığında doğrudan PIN kodu ekranı karşılar
+    return null; // Directly presents PIN login screen on boot
   });
   const [coachPin, setCoachPin] = useState<string>(() => {
     try {
@@ -107,8 +117,15 @@ export default function App() {
   useEffect(() => {
     try {
       if (authSession) {
-        localStorage.setItem('yks_kocluk_auth_session_v1', JSON.stringify(authSession));
+        sessionStorage.setItem('yks_kocluk_auth_session_v1', JSON.stringify(authSession));
+        if (authSession.role === 'coach') {
+          localStorage.setItem('yks_kocluk_auth_session_v1', JSON.stringify(authSession));
+        } else {
+          // Prevent student sessions from being synced/overwritten in other tabs
+          localStorage.removeItem('yks_kocluk_auth_session_v1');
+        }
       } else {
+        sessionStorage.removeItem('yks_kocluk_auth_session_v1');
         localStorage.removeItem('yks_kocluk_auth_session_v1');
       }
     } catch {}
