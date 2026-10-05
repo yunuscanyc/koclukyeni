@@ -63,6 +63,7 @@ interface StudentPortalViewProps {
   questions?: SoruTakipKaydi[];
   exams?: DenemeSinavi[];
   assignedResources?: StudentAssignedResource[];
+  books?: BookResource[];
   onLogout: () => void;
   onSaveExamArchive?: (archive: OgrenciSinavKaydi, newDeneme?: DenemeSinavi) => void;
   onUpdateScheduleTask?: (task: WeeklyScheduleTask) => void;
@@ -80,6 +81,7 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
   questions = [],
   exams = [],
   assignedResources = [],
+  books = [],
   onLogout,
   onSaveExamArchive,
   onUpdateScheduleTask,
@@ -88,6 +90,41 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
   onToggleAssignedResource,
 }) => {
   const [activePortalTab, setActivePortalTab] = useState<'testler' | 'hedefler' | 'haftalik-program' | 'soru-takibi' | 'atanan-kaynaklar'>('testler');
+
+  // Resilient schedule state: sync with props and fetch directly as fallback to guarantee student always sees their schedule
+  const [portalSchedules, setPortalSchedules] = useState<WeeklyScheduleTask[]>(schedules);
+
+  useEffect(() => {
+    if (schedules && schedules.length > 0) {
+      setPortalSchedules(schedules);
+    }
+  }, [schedules]);
+
+  useEffect(() => {
+    let isMounted = true;
+    fetch('/api/schedules')
+      .then((r) => r.json())
+      .then((allTasks: WeeklyScheduleTask[]) => {
+        if (!isMounted || !Array.isArray(allTasks)) return;
+        const myTasks = allTasks.filter(
+          (t) => !t.studentId || 
+                 t.studentId === student.id || 
+                 String(t.studentId).trim() === String(student.id).trim()
+        );
+        if (myTasks.length > 0) {
+          setPortalSchedules(myTasks);
+        }
+      })
+      .catch(() => {});
+    return () => { isMounted = false; };
+  }, [student.id]);
+
+  const handleStudentUpdateTask = (task: WeeklyScheduleTask) => {
+    setPortalSchedules((prev) => prev.map((t) => t.id === task.id ? task : t));
+    if (onUpdateScheduleTask) {
+      onUpdateScheduleTask(task);
+    }
+  };
   const [resourceFilter, setResourceFilter] = useState<'all' | 'pending' | 'completed'>('pending');
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [selectedArchive, setSelectedArchive] = useState<OgrenciSinavKaydi | null>(null);
@@ -555,11 +592,11 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
                 <CalendarDays className="w-4 h-4 shrink-0" />
                 <span className="truncate">Haftalık Program</span>
               </div>
-              {schedules.length > 0 && (
+              {portalSchedules.length > 0 && (
                 <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold shrink-0 ${
                   activePortalTab === 'haftalik-program' ? 'bg-indigo-800 text-white' : 'bg-slate-200 text-slate-700'
                 }`}>
-                  {schedules.length}
+                  {portalSchedules.length}
                 </span>
               )}
             </button>
@@ -598,7 +635,7 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
             { key: 'atanan-kaynaklar', label: 'Kaynaklar', icon: BookOpen, badge: pendingAssignedResources.length > 0 ? pendingAssignedResources.length : undefined },
             { key: 'hedefler', label: 'Hedeflerim', icon: Target, badge: myNotes.length > 0 ? myNotes.length : undefined },
             { key: 'soru-takibi', label: 'Soru Takip', icon: HelpCircle, badge: myQuestions.length > 0 ? myQuestions.length : undefined },
-            { key: 'haftalik-program', label: 'Programım', icon: CalendarDays, badge: schedules.length > 0 ? schedules.length : undefined },
+            { key: 'haftalik-program', label: 'Programım', icon: CalendarDays, badge: portalSchedules.length > 0 ? portalSchedules.length : undefined },
           ].map((item) => {
             const ItemIcon = item.icon;
             const isActive = activePortalTab === item.key;
@@ -1554,9 +1591,10 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
         {activePortalTab === 'haftalik-program' && (
           <div className="space-y-6 animate-in fade-in duration-200">
             <WeeklyScheduleTab
-              tasks={schedules}
+              tasks={portalSchedules}
+              books={books}
               studentId={student.id}
-              onUpdateTask={onUpdateScheduleTask}
+              onUpdateTask={handleStudentUpdateTask}
               studentName={student.adSoyad}
               isStudentView={true}
             />

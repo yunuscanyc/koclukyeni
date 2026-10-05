@@ -211,12 +211,14 @@ export const WeeklyScheduleTab: React.FC<WeeklyScheduleTabProps> = ({
 
   // Filter tasks to show ONLY those belonging to the current selected week (or legacy template tasks with no date)
   const currentWeekTasks = tasks.filter((t) => {
-    const dayIdx = DAYS.findIndex((d) => d.id === t.gun);
-    if (dayIdx === -1) return false;
     if (t.tarih) {
-      return t.tarih === weekDates[dayIdx];
+      if (weekDates.includes(t.tarih)) return true;
+      const dayIdx = DAYS.findIndex((d) => d.id === t.gun);
+      if (dayIdx !== -1 && t.tarih === weekDates[dayIdx]) return true;
+      return false;
     }
-    return true;
+    const dayIdx = DAYS.findIndex((d) => d.id === t.gun);
+    return dayIdx !== -1;
   });
 
   // Modal State
@@ -683,9 +685,26 @@ export const WeeklyScheduleTab: React.FC<WeeklyScheduleTabProps> = ({
 
         <div className="flex flex-col items-center text-center">
           <span className="text-[10px] text-indigo-600 font-extrabold uppercase tracking-wider">Seçili Çalışma Dönemi</span>
-          <h3 className="text-sm sm:text-base font-black text-slate-900 mt-0.5">
-            {getWeekRangeLabel(currentMonday)}
-          </h3>
+          <div className="flex items-center gap-2 mt-0.5">
+            <h3 className="text-sm sm:text-base font-black text-slate-900">
+              {getWeekRangeLabel(currentMonday)}
+            </h3>
+            <button
+              type="button"
+              onClick={() => {
+                const localNow = new Date();
+                const day = localNow.getDay();
+                const diff = localNow.getDate() - day + (day === 0 ? -6 : 1);
+                const monday = new Date(localNow.setDate(diff));
+                monday.setHours(0, 0, 0, 0);
+                setCurrentMonday(monday);
+              }}
+              className="text-[10px] px-2 py-0.5 rounded-md bg-indigo-50 hover:bg-indigo-100 text-indigo-600 font-bold border border-indigo-200 transition-colors cursor-pointer"
+              title="Bugünün haftasına dön"
+            >
+              Bu Hafta
+            </button>
+          </div>
         </div>
 
         <div className="flex items-center gap-2 w-full sm:w-auto flex-wrap sm:flex-nowrap justify-end">

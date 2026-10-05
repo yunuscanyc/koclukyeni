@@ -268,12 +268,31 @@ export default function App() {
 
       // 3. Load active tab data immediately on boot
       loadTabData(activeTab || 'genel');
+
+      // 4. Eagerly load schedules, exam archives, and assigned resources on boot
+      getSchedules().then((s) => { if (s && s.length > 0) setSchedules(s); }).catch(() => {});
+      getExamArchives().then((a) => { if (a && a.length > 0) setExamArchives(a); }).catch(() => {});
+      getAssignedResources().then((ar) => { if (ar && ar.length > 0) setAssignedResources(ar); }).catch(() => {});
     }
     loadInitialData();
     return () => {
       isMounted = false;
     };
   }, []);
+
+  // Eagerly fetch all student data whenever a student logs in
+  useEffect(() => {
+    if (authSession?.role === 'student') {
+      getSchedules().then((s) => { if (s && s.length > 0) setSchedules(s); }).catch(() => {});
+      getExamArchives().then((a) => { if (a && a.length > 0) setExamArchives(a); }).catch(() => {});
+      getCoachNotes().then((n) => { if (n && n.length > 0) setNotes(n); }).catch(() => {});
+      getQuestions().then((q) => { if (q && q.length > 0) setQuestions(q); }).catch(() => {});
+      getExams().then((e) => { if (e && e.length > 0) setExams(e); }).catch(() => {});
+      getAssignedResources().then((ar) => { if (ar && ar.length > 0) setAssignedResources(ar); }).catch(() => {});
+      getBooks().then((b) => { if (b && b.length > 0) setBooks(b); }).catch(() => {});
+      getCurriculum().then((c) => { if (c && c.length > 0) setCurriculum(c); }).catch(() => {});
+    }
+  }, [authSession]);
 
   // Periodic polling for active background AI jobs and real-time syncing of tasks, exams, notes, and questions
   useEffect(() => {
@@ -462,6 +481,22 @@ export default function App() {
                 return Array.from(map.values());
               });
             }
+          }
+        } catch {}
+
+        // 7. Sync Schedules (Haftalık Program)
+        try {
+          const sList = await getSchedules();
+          if (Array.isArray(sList) && sList.length > 0) {
+            setSchedules(sList);
+          }
+        } catch {}
+
+        // 8. Sync Assigned Resources
+        try {
+          const arList = await getAssignedResources();
+          if (Array.isArray(arList) && arList.length > 0) {
+            setAssignedResources(arList);
           }
         } catch {}
       } catch (e) {
@@ -1222,7 +1257,14 @@ export default function App() {
       (n) => !n.studentId || n.studentId === currentStudent?.id
     );
     const currentStudentSchedules = schedules.filter(
-      (s) => s.studentId === currentStudent?.id
+      (s) => !s.studentId || 
+             s.studentId === currentStudent?.id || 
+             String(s.studentId).trim() === String(currentStudent?.id).trim()
+    );
+    const currentStudentResources = assignedResources.filter(
+      (ar) => !ar.studentId || 
+              ar.studentId === currentStudent?.id || 
+              String(ar.studentId).trim() === String(currentStudent?.id).trim()
     );
 
     return (
@@ -1235,7 +1277,8 @@ export default function App() {
           curriculum={curriculum}
           questions={questions}
           exams={exams}
-          assignedResources={assignedResources}
+          assignedResources={currentStudentResources}
+          books={books}
           onLogout={() => setAuthSession(null)}
           onSaveExamArchive={handleSaveExamArchive}
           onUpdateScheduleTask={handleUpdateScheduleTask}
