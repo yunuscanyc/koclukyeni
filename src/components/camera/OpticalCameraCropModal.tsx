@@ -351,13 +351,28 @@ export const OpticalCameraCropModal: React.FC<OpticalCameraCropModalProps> = ({
       const cropWidth = Math.max(50, px2 - px1);
       const cropHeight = Math.max(50, py2 - py1);
 
+      // Optimal resolution clamp for OCR text clarity and lightning-fast upload (~200KB - 400KB)
+      const MAX_W = 1200;
+      const MAX_H = 1600;
+      let targetW = cropWidth;
+      let targetH = cropHeight;
+
+      if (targetW > MAX_W || targetH > MAX_H) {
+        const scale = Math.min(MAX_W / targetW, MAX_H / targetH);
+        targetW = Math.max(1, Math.round(targetW * scale));
+        targetH = Math.max(1, Math.round(targetH * scale));
+      }
+
       const targetCanvas = document.createElement('canvas');
-      targetCanvas.width = cropWidth;
-      targetCanvas.height = cropHeight;
+      targetCanvas.width = targetW;
+      targetCanvas.height = targetH;
       const targetCtx = targetCanvas.getContext('2d');
       if (!targetCtx) return;
 
-      // Draw cropped slice
+      targetCtx.imageSmoothingEnabled = true;
+      targetCtx.imageSmoothingQuality = 'high';
+
+      // Draw cropped slice onto targetCanvas
       targetCtx.drawImage(
         srcCanvas,
         px1,
@@ -366,12 +381,12 @@ export const OpticalCameraCropModal: React.FC<OpticalCameraCropModalProps> = ({
         cropHeight,
         0,
         0,
-        cropWidth,
-        cropHeight
+        targetW,
+        targetH
       );
 
-      // Clean compression
-      const finalCroppedBase64 = targetCanvas.toDataURL('image/jpeg', 0.90);
+      // Clean compression: 0.85 quality produces crisp mathematical formulas and compact ~200-350 KB size
+      const finalCroppedBase64 = targetCanvas.toDataURL('image/jpeg', 0.85);
       onPhotoCropped(finalCroppedBase64);
       onClose();
     } catch (err) {
