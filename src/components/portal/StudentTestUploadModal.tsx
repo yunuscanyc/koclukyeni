@@ -31,6 +31,7 @@ interface StudentTestUploadModalProps {
   student: Student;
   curriculum?: Kazanim[];
   onTestUploaded: (archive: OgrenciSinavKaydi, newDeneme?: DenemeSinavi) => void;
+  initialPhotos?: string[];
 }
 
 export const StudentTestUploadModal: React.FC<StudentTestUploadModalProps> = ({
@@ -39,6 +40,7 @@ export const StudentTestUploadModal: React.FC<StudentTestUploadModalProps> = ({
   student,
   curriculum = [],
   onTestUploaded,
+  initialPhotos = [],
 }) => {
   // Form States
   const [testName, setTestName] = useState('');
@@ -51,7 +53,14 @@ export const StudentTestUploadModal: React.FC<StudentTestUploadModalProps> = ({
   const [showManualStats, setShowManualStats] = useState(false);
 
   // Photos State: array of base64 data URLs
-  const [photos, setPhotos] = useState<string[]>([]);
+  const [photos, setPhotos] = useState<string[]>(initialPhotos);
+
+  // Synchronize initialPhotos when modal opens with pre-captured photo
+  React.useEffect(() => {
+    if (initialPhotos && initialPhotos.length > 0) {
+      setPhotos((prev) => (prev.length === 0 ? initialPhotos : prev));
+    }
+  }, [initialPhotos]);
   const [previewPhoto, setPreviewPhoto] = useState<string | null>(null);
   const [isProcessingPhoto, setIsProcessingPhoto] = useState(false);
 
@@ -67,7 +76,6 @@ export const StudentTestUploadModal: React.FC<StudentTestUploadModalProps> = ({
 
   // Input refs
   const galleryInputRef = useRef<HTMLInputElement>(null);
-  const cameraInputRef = useRef<HTMLInputElement>(null);
 
   if (!isOpen) return null;
 
@@ -107,12 +115,6 @@ export const StudentTestUploadModal: React.FC<StudentTestUploadModalProps> = ({
   // Handle Multi-file selection from gallery
   const handleGalleryFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
     await processPhotoFiles(e.target.files, 'Galeri');
-    e.target.value = '';
-  };
-
-  // Handle Single or sequential camera snap
-  const handleCameraSnap = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    await processPhotoFiles(e.target.files, 'Kamera');
     e.target.value = '';
   };
 
@@ -547,7 +549,7 @@ export const StudentTestUploadModal: React.FC<StudentTestUploadModalProps> = ({
                 <span className="text-[11px] text-slate-400">Çoklu fotoğraf desteklenir</span>
               </div>
 
-              {/* Hidden file inputs */}
+              {/* Hidden file input for gallery */}
               <input
                 ref={galleryInputRef}
                 type="file"
@@ -555,14 +557,6 @@ export const StudentTestUploadModal: React.FC<StudentTestUploadModalProps> = ({
                 multiple
                 className="hidden"
                 onChange={handleGalleryFiles}
-              />
-              <input
-                ref={cameraInputRef}
-                type="file"
-                accept="image/*,.heic,.heif"
-                capture="environment"
-                className="hidden"
-                onChange={handleCameraSnap}
               />
 
               {/* Processing notification */}
@@ -587,7 +581,7 @@ export const StudentTestUploadModal: React.FC<StudentTestUploadModalProps> = ({
                   <div className="w-7 h-7 rounded-xl bg-white/20 text-white flex items-center justify-center shrink-0">
                     {isProcessingPhoto ? <Loader2 className="w-4 h-4 animate-spin" /> : <Camera className="w-4 h-4" />}
                   </div>
-                  <span>📷 Fotoğraf Çek (Uygulama İçi Kamera & Kırp)</span>
+                  <span>📷 Fotoğraf Çek & Kırp (Pop-up Kamera)</span>
                 </button>
 
                 <button

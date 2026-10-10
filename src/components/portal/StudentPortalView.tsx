@@ -44,8 +44,9 @@ import {
   ArrowRight,
   Download
 } from 'lucide-react';
-import { Student, OgrenciSinavKaydi, Kazanim, SoruAnalizDetay, CoachNote, WeeklyScheduleTask, SoruTakipKaydi, DenemeSinavi, StudentAssignedResource, BookDifficulty } from '../../types';
+import { Student, OgrenciSinavKaydi, Kazanim, SoruAnalizDetay, CoachNote, WeeklyScheduleTask, SoruTakipKaydi, DenemeSinavi, StudentAssignedResource, BookDifficulty, BookResource } from '../../types';
 import { StudentTestUploadModal } from './StudentTestUploadModal';
+import { OpticalCameraCropModal } from '../camera/OpticalCameraCropModal';
 import { getExamArchiveById, saveExamArchive } from '../../lib/apiService';
 import { PWAInstallButton } from '../pwa/PWAInstallButton';
 import { QuestionSolutionView } from '../coaching/QuestionSolutionView';
@@ -127,6 +128,8 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
   };
   const [resourceFilter, setResourceFilter] = useState<'all' | 'pending' | 'completed'>('pending');
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [isDirectCameraCropOpen, setIsDirectCameraCropOpen] = useState(false);
+  const [preCapturedPhotos, setPreCapturedPhotos] = useState<string[]>([]);
   const [selectedArchive, setSelectedArchive] = useState<OgrenciSinavKaydi | null>(null);
   const [viewingPhotoModal, setViewingPhotoModal] = useState<{
     photoUrl: string;
@@ -431,6 +434,12 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
     }
   };
 
+  const handleDirectPhotoCropped = (croppedBase64: string) => {
+    setPreCapturedPhotos([croppedBase64]);
+    setIsDirectCameraCropOpen(false);
+    setIsUploadModalOpen(true);
+  };
+
   const getAIStatusBadge = (archive: OgrenciSinavKaydi) => {
     const photos = archive.sayfaFotolari || archive.fotografYollari || [];
     const totalPages = photos.length || (archive as any).photosCount || (archive as any).sayfaSayisi || 0;
@@ -676,13 +685,22 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
                 <h2 className="text-xl font-bold text-slate-800">Çözdüğün Testler & Yapay Zekâ Analizleri</h2>
                 <p className="text-xs text-slate-400 mt-1">Yüklediğin testlerin soru çözümlerini ve MEB kazanımlarını incele.</p>
               </div>
-              <button
-                onClick={() => setIsUploadModalOpen(true)}
-                className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-md shadow-indigo-100 transition-all flex items-center gap-2 active:scale-95 self-start sm:self-auto"
-              >
-                <Camera className="w-4 h-4" />
-                <span>Yeni Test Fotoğrafı Yükle</span>
-              </button>
+              <div className="flex items-center gap-2.5 flex-wrap self-start sm:self-auto">
+                <button
+                  onClick={() => setIsDirectCameraCropOpen(true)}
+                  className="px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md shadow-slate-900/10 transition-all flex items-center gap-2 active:scale-95 cursor-pointer"
+                  title="Pop-up kameramız ile fotoğrafı çekip hemen kırpın"
+                >
+                  <Camera className="w-4 h-4 text-indigo-400" />
+                  <span>📷 Fotoğraf Çek & Kırp</span>
+                </button>
+                <button
+                  onClick={() => setIsUploadModalOpen(true)}
+                  className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-md shadow-indigo-100 transition-all flex items-center gap-2 active:scale-95 cursor-pointer"
+                >
+                  <span>Test Yükleme Formu</span>
+                </button>
+              </div>
             </div>
 
             {/* Uploaded Tests History */}
@@ -1461,13 +1479,21 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
                     Çözdüğünüz deneme veya yaprak testlerin fotoğrafını çekip yükleyerek yapay zekâ analizi yaptırabilir ve koçunuzla paylaşabilirsiniz.
                   </div>
                 </div>
-                <button
-                  onClick={() => setIsUploadModalOpen(true)}
-                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-md shadow-indigo-100"
-                >
-                  <Camera className="w-4 h-4" />
-                  <span>İlk Testimi Fotoğrafla & Yükle</span>
-                </button>
+                <div className="flex items-center justify-center gap-2.5 flex-wrap pt-1">
+                  <button
+                    onClick={() => setIsDirectCameraCropOpen(true)}
+                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold shadow-md cursor-pointer"
+                  >
+                    <Camera className="w-4 h-4 text-indigo-400" />
+                    <span>📷 Fotoğraf Çek & Kırp</span>
+                  </button>
+                  <button
+                    onClick={() => setIsUploadModalOpen(true)}
+                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-md shadow-indigo-100 cursor-pointer"
+                  >
+                    <span>Test Yükleme Formu</span>
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -1953,10 +1979,23 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
       {isUploadModalOpen && (
         <StudentTestUploadModal
           isOpen={isUploadModalOpen}
-          onClose={() => setIsUploadModalOpen(false)}
+          onClose={() => {
+            setIsUploadModalOpen(false);
+            setPreCapturedPhotos([]);
+          }}
           student={student}
           curriculum={curriculum}
           onTestUploaded={handleTestUploaded}
+          initialPhotos={preCapturedPhotos}
+        />
+      )}
+
+      {/* Direct In-App Camera & Crop Modal */}
+      {isDirectCameraCropOpen && (
+        <OpticalCameraCropModal
+          isOpen={isDirectCameraCropOpen}
+          onClose={() => setIsDirectCameraCropOpen(false)}
+          onPhotoCropped={handleDirectPhotoCropped}
         />
       )}
 

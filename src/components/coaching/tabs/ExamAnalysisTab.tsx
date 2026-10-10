@@ -24,6 +24,7 @@ import {
 import { Student, OgrenciSinavKaydi, SinavSorusu, DenemeSinavi } from '../../../types';
 import { compressImageFile } from '../../../utils/imageCompressor';
 import { QuestionSolutionView } from '../QuestionSolutionView';
+import { OpticalCameraCropModal } from '../../camera/OpticalCameraCropModal';
 
 interface ExamAnalysisTabProps {
   student: Student;
@@ -48,6 +49,7 @@ export const ExamAnalysisTab: React.FC<ExamAnalysisTabProps> = ({
   const [currentImageBase64, setCurrentImageBase64] = useState<string | null>(null);
   const [isAnalyzingPage, setIsAnalyzingPage] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [isCameraCropModalOpen, setIsCameraCropModalOpen] = useState(false);
 
   // Zoom & Pan & Rotation
   const [zoom, setZoom] = useState(1);
@@ -86,6 +88,14 @@ export const ExamAnalysisTab: React.FC<ExamAnalysisTabProps> = ({
     } catch (err) {
       console.warn("Fotoğraf sıkıştırma hatası:", err);
     }
+  };
+
+  const handlePhotoCropped = (croppedBase64: string) => {
+    setCurrentImageBase64(croppedBase64);
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+    setAnalysisError(null);
+    setIsCameraCropModalOpen(false);
   };
 
   // Analyze page with Gemini Vision OCR
@@ -528,16 +538,18 @@ export const ExamAnalysisTab: React.FC<ExamAnalysisTabProps> = ({
                   </div>
                 ) : (
                   <div
-                    onClick={() => fileInputRef.current?.click()}
+                    onClick={() => setIsCameraCropModalOpen(true)}
                     className="cursor-pointer p-8 text-center text-slate-400 space-y-3 hover:text-slate-200 transition-colors"
                   >
-                    <Upload className="w-10 h-10 mx-auto text-indigo-400 animate-bounce" />
+                    <div className="w-12 h-12 rounded-2xl bg-indigo-600/30 text-indigo-400 flex items-center justify-center mx-auto shadow-md">
+                      <Camera className="w-6 h-6 animate-pulse" />
+                    </div>
                     <div>
                       <p className="text-xs font-bold text-white">
-                        Sayfa {currentPageNo} Fotoğrafını Yükleyin veya Çekin
+                        Sayfa {currentPageNo} Fotoğrafını Pop-up Kamera ile Çekin veya Yükleyin
                       </p>
                       <p className="text-[11px] text-slate-400 mt-1">
-                        JPG, PNG veya akıllı telefon kamerası ile kitapçık sayfasını seçin
+                        Tıklayınca açılan pop-up kameramız ile fotoğrafı çekip tutamaçlarla kırpabilirsiniz
                       </p>
                     </div>
                   </div>
@@ -562,13 +574,27 @@ export const ExamAnalysisTab: React.FC<ExamAnalysisTabProps> = ({
 
               {/* Bottom Action for Page */}
               <div className="flex items-center justify-between gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold"
-                >
-                  {currentImageBase64 ? 'Farklı Fotoğraf Seç' : 'Fotoğraf Seç'}
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsCameraCropModalOpen(true)}
+                    className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer active:scale-95"
+                  >
+                    <Camera className="w-3.5 h-3.5" />
+                    <span>{currentImageBase64 ? '📷 Fotoğrafı Yeniden Çek / Değiştir' : '📷 Fotoğraf Çek & Kırp (Pop-up)'}</span>
+                  </button>
+                  {currentImageBase64 && (
+                    <button
+                      type="button"
+                      onClick={() => setIsCameraCropModalOpen(true)}
+                      className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold flex items-center gap-1 cursor-pointer"
+                      title="Mevcut fotoğrafın kenarlarını tekrar kırp"
+                    >
+                      <RotateCcw className="w-3 h-3 text-slate-500" />
+                      <span>Kırp</span>
+                    </button>
+                  )}
+                </div>
 
                 <button
                   type="button"
@@ -740,6 +766,15 @@ export const ExamAnalysisTab: React.FC<ExamAnalysisTabProps> = ({
             </div>
           </div>
         </div>
+      )}
+      {/* In-App Optical Camera & Crop Popup Modal */}
+      {isCameraCropModalOpen && (
+        <OpticalCameraCropModal
+          isOpen={isCameraCropModalOpen}
+          onClose={() => setIsCameraCropModalOpen(false)}
+          initialImage={currentImageBase64}
+          onPhotoCropped={handlePhotoCropped}
+        />
       )}
     </div>
   );
