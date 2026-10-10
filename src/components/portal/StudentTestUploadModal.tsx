@@ -17,11 +17,13 @@ import {
   HelpCircle,
   Clock,
   Layers,
-  FileCheck
+  FileCheck,
+  Crop
 } from 'lucide-react';
 import { Student, OgrenciSinavKaydi, Kazanim, DenemeSinavi } from '../../types';
 import { analyzeAndSaveStudentTest } from '../../lib/apiService';
 import { compressImageFile } from '../../utils/imageCompressor';
+import { OpticalCameraCropModal } from '../camera/OpticalCameraCropModal';
 
 interface StudentTestUploadModalProps {
   isOpen: boolean;
@@ -52,6 +54,10 @@ export const StudentTestUploadModal: React.FC<StudentTestUploadModalProps> = ({
   const [photos, setPhotos] = useState<string[]>([]);
   const [previewPhoto, setPreviewPhoto] = useState<string | null>(null);
   const [isProcessingPhoto, setIsProcessingPhoto] = useState(false);
+
+  // In-App Camera & Crop Popup State (handles camera capture and boundary cropping with handles)
+  const [isCameraCropModalOpen, setIsCameraCropModalOpen] = useState(false);
+  const [cropTargetImage, setCropTargetImage] = useState<{ image: string; index?: number } | null>(null);
 
   // Processing & Status States
   const [isProcessing, setIsProcessing] = useState(false);
@@ -112,6 +118,20 @@ export const StudentTestUploadModal: React.FC<StudentTestUploadModalProps> = ({
 
   const handleRemovePhoto = (indexToRemove: number) => {
     setPhotos((prev) => prev.filter((_, idx) => idx !== indexToRemove));
+  };
+
+  const handlePhotoCropped = (croppedBase64: string) => {
+    if (cropTargetImage && typeof cropTargetImage.index === 'number') {
+      setPhotos((prev) => {
+        const next = [...prev];
+        next[cropTargetImage.index!] = croppedBase64;
+        return next;
+      });
+    } else {
+      setPhotos((prev) => [...prev, croppedBase64]);
+    }
+    setCropTargetImage(null);
+    setIsCameraCropModalOpen(false);
   };
 
   // Submit & Start Background AI Analysis or Direct Coach Send
@@ -557,14 +577,17 @@ export const StudentTestUploadModal: React.FC<StudentTestUploadModalProps> = ({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <button
                   type="button"
-                  onClick={() => cameraInputRef.current?.click()}
+                  onClick={() => {
+                    setCropTargetImage(null);
+                    setIsCameraCropModalOpen(true);
+                  }}
                   disabled={isProcessing || isProcessingPhoto}
-                  className="p-3.5 rounded-2xl bg-indigo-50/80 border border-indigo-200 text-indigo-900 hover:bg-indigo-100 transition-all flex items-center justify-center gap-2 text-xs font-bold active:scale-98 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                  className="p-3.5 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white transition-all flex items-center justify-center gap-2.5 text-xs font-bold active:scale-98 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer shadow-md shadow-indigo-600/20"
                 >
-                  <div className="w-7 h-7 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0">
+                  <div className="w-7 h-7 rounded-xl bg-white/20 text-white flex items-center justify-center shrink-0">
                     {isProcessingPhoto ? <Loader2 className="w-4 h-4 animate-spin" /> : <Camera className="w-4 h-4" />}
                   </div>
-                  <span>{isProcessingPhoto ? 'İşleniyor...' : '📷 Fotoğraf Çek (Kamera)'}</span>
+                  <span>📷 Fotoğraf Çek (Uygulama İçi Kamera & Kırp)</span>
                 </button>
 
                 <button
@@ -598,19 +621,30 @@ export const StudentTestUploadModal: React.FC<StudentTestUploadModalProps> = ({
                         <div className="absolute top-1 left-1 px-1.5 py-0.5 rounded-md bg-slate-900/80 text-white text-[9px] font-bold">
                           Sayfa {index + 1}
                         </div>
-                        <div className="absolute inset-0 bg-slate-900/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1.5 p-1">
+                        <div className="absolute inset-0 bg-slate-900/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1 p-1">
                           <button
                             type="button"
                             onClick={() => setPreviewPhoto(photo)}
-                            className="p-1 rounded-lg bg-white/90 text-slate-900 hover:bg-white"
+                            className="p-1 rounded-lg bg-white/90 text-slate-900 hover:bg-white cursor-pointer"
                             title="Büyüt"
                           >
                             <Eye className="w-3.5 h-3.5" />
                           </button>
                           <button
                             type="button"
+                            onClick={() => {
+                              setCropTargetImage({ image: photo, index });
+                              setIsCameraCropModalOpen(true);
+                            }}
+                            className="p-1 rounded-lg bg-indigo-600 text-white hover:bg-indigo-500 cursor-pointer"
+                            title="Kenarları Kırp"
+                          >
+                            <Crop className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
                             onClick={() => handleRemovePhoto(index)}
-                            className="p-1 rounded-lg bg-rose-600 text-white hover:bg-rose-700"
+                            className="p-1 rounded-lg bg-rose-600 text-white hover:bg-rose-700 cursor-pointer"
                             title="Sil"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -621,11 +655,14 @@ export const StudentTestUploadModal: React.FC<StudentTestUploadModalProps> = ({
 
                     <button
                       type="button"
-                      onClick={() => galleryInputRef.current?.click()}
-                      className="aspect-3/4 rounded-xl border-2 border-dashed border-slate-300 hover:border-indigo-400 hover:bg-indigo-50/50 flex flex-col items-center justify-center gap-1 text-slate-500 hover:text-indigo-600 transition-all text-[11px] font-bold"
+                      onClick={() => {
+                        setCropTargetImage(null);
+                        setIsCameraCropModalOpen(true);
+                      }}
+                      className="aspect-3/4 rounded-xl border-2 border-dashed border-indigo-200 hover:border-indigo-400 bg-indigo-50/40 hover:bg-indigo-50/80 flex flex-col items-center justify-center gap-1 text-indigo-600 transition-all text-[11px] font-bold cursor-pointer"
                     >
-                      <Plus className="w-5 h-5" />
-                      <span>Sayfa Ekle</span>
+                      <Plus className="w-5 h-5 text-indigo-600" />
+                      <span>Fotoğraf Çek</span>
                     </button>
                   </div>
                 </div>
@@ -719,6 +756,19 @@ export const StudentTestUploadModal: React.FC<StudentTestUploadModalProps> = ({
               className="max-w-full max-h-[85vh] object-contain rounded-xl"
             />
           </div>
+        )}
+
+        {/* In-App Optical Camera & Crop Modal Popup */}
+        {isCameraCropModalOpen && (
+          <OpticalCameraCropModal
+            isOpen={isCameraCropModalOpen}
+            onClose={() => {
+              setIsCameraCropModalOpen(false);
+              setCropTargetImage(null);
+            }}
+            initialImage={cropTargetImage?.image || null}
+            onPhotoCropped={handlePhotoCropped}
+          />
         )}
 
       </div>
