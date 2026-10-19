@@ -2708,6 +2708,24 @@ function extractGeminiRetryDelay(errStr: string): number {
   return 20; // Default 20 seconds instead of 15 minutes!
 }
 
+// Helper: Dynamically get NVIDIA API Key from process.env or .env file directly (handles PM2 without --update-env)
+function getNvidiaApiKey(): string {
+  let key = process.env.NVIDIA_API_KEY || "";
+  if (!key || key.trim().length === 0) {
+    try {
+      const envPath = path.resolve(process.cwd(), ".env");
+      if (fs.existsSync(envPath)) {
+        const content = fs.readFileSync(envPath, "utf-8");
+        const match = content.match(/^NVIDIA_API_KEY\s*=\s*["']?([^"'\r\n]+)["']?/m);
+        if (match && match[1]) {
+          key = match[1].trim();
+        }
+      }
+    } catch {}
+  }
+  return key.trim();
+}
+
 // Helper: Run Vision Generation with Automatic Multi-Provider Model Failover
 async function executeVisionWithFallback(
   ai: GoogleGenAI | null,
@@ -2722,17 +2740,77 @@ async function executeVisionWithFallback(
   let lastError: any = null;
   let allRateLimited = true;
 
-  // 1. Google Gemini Flash & Pro Models (Active & non-cooling across all API Key slots)
+  const nvidiaKey = getNvidiaApiKey();
+  const preferredProvider = (process.env.PREFERRED_AI_PROVIDER || (nvidiaKey ? "nvidia" : "gemini")).toLowerCase().trim();
+  const tryNvidiaFirst = Boolean(nvidiaKey && nvidiaKey.length > 5 && preferredProvider === "nvidia");
+
+  const attemptNvidiaVision = async (): Promise<{ text: string; usedModel: string } | null> => {
+    if (!nvidiaKey) return null;
+    try {
+      console.log(`[Vision] 🚀 NVIDIA NIM Vision ile soru analizi deneniyor (Llama 3.2 90B / Nemotron)...`);
+      const nvText = await callNvidiaVision(nvidiaKey, {
+        prompt: params.prompt,
+        mimeType: params.mimeType,
+        cleanBase64: params.cleanBase64,
+        temperature: params.temperature,
+      });
+      if (nvText && nvText.trim().length > 0) {
+        console.log(`[Vision] ✅ NVIDIA NIM Vision başarıyla sonuç üretti!`);
+        addSystemLog({
+          level: "success",
+          source: "nvidia",
+          message: `✅ Optik görsel soru analizi başarılı: NVIDIA NIM Vision yanıt verdi.`,
+          model: "meta/llama-3.2-90b-vision-instruct",
+        });
+        return { text: nvText, usedModel: "nvidia/llama-3.2-90b-vision" };
+      }
+    } catch (nvErr: any) {
+      console.warn(`[Vision] ⚠️ NVIDIA NIM Vision başarısız oldu:`, nvErr?.message || nvErr);
+    }
+    return null;
+  };
+
+  // 1. If NVIDIA is configured or preferred, run NVIDIA NIM FIRST (skip Gemini 429 quota loops!)
+  if (tryNvidiaFirst) {
+    console.log(`[Vision Pipeline] ⚡ Tercih edilen sağlayıcı NVIDIA NIM aktif. Doğrudan NVIDIA çağrılıyor...`);
+    const nvResult = await attemptNvidiaVision();
+    if (nvResult) return nvResult;
+    console.warn(`[Vision Failover] NVIDIA NIM başarısız oldu, Gemini modellerine geçiliyor...`);
+  }
+
+  // 2. Google Gemini Flash & Pro Models (Active & non-cooling across all API Key slots)
   const candidateSlots = getGeminiCandidateClients();
   if (candidateSlots.length > 0) {
-    const { activeList, coolingCount } = getSortedModelList(FLASH_VISION_CASCADE);
+    const { activeList } = getSortedModelList(FLASH_VISION_CASCADE);
+    let consecutiveKeyQuotas = 0;
 
     for (let i = 0; i < activeList.length; i++) {
       const modelName = activeList[i];
-      let modelSuccess = false;
+
+      // Smart Circuit Breaker: If all keys are in cooldown, don't waste time on remaining models!
+      const availableKeys = candidateSlots.filter((s) => {
+        const slotObj = geminiKeySlots.find(sl => sl.client === s.client);
+        return !slotObj || slotObj.cooldownUntil <= Date.now();
+      });
+      if (availableKeys.length === 0) {
+        console.warn(`[Gemini Flash Failover] ⚠️ Tüm (${candidateSlots.length}) Gemini anahtarları şu an 429 kota beklemesinde! Kalan modeller atlanıyor...`);
+        if (nvidiaKey) {
+          console.log(`[Gemini Flash Failover] ⚡ Gemini kotaları doldu, anında NVIDIA NIM API'ye geçiş yapılıyor!`);
+          const fastNv = await attemptNvidiaVision();
+          if (fastNv) return fastNv;
+        }
+        break;
+      }
 
       for (let k = 0; k < candidateSlots.length; k++) {
         const { client, maskedKey } = candidateSlots[k];
+        const slotObj = geminiKeySlots.find(sl => sl.client === client);
+
+        // Skip slot if in cooldown
+        if (slotObj && slotObj.cooldownUntil > Date.now()) {
+          continue;
+        }
+
         try {
           console.log(
             `[Gemini Flash Vision] Deneniyor: ${modelName} (Model ${i + 1}/${activeList.length}, Anahtar ${maskedKey} [${k + 1}/${candidateSlots.length}])...`
@@ -2792,10 +2870,18 @@ async function executeVisionWithFallback(
             errStr.includes("too many requests");
 
           if (isQuota) {
+            consecutiveKeyQuotas++;
             setGeminiKeyCooldown(client, 60000); // Cooldown this key for 60s
             console.warn(
               `[Gemini Key Quota] ⚠️ Anahtar (${maskedKey}) için 429 Kota Sınırı. Sıradaki anahtara geçiliyor...`
             );
+
+            // Fast breakout: If 2 keys hit 429 and we have NVIDIA API key, break immediately!
+            if (nvidiaKey && consecutiveKeyQuotas >= 2) {
+              console.log(`[Gemini Key Quota] ⚡ Gemini 429 kotasına çarptı, beklemeden derhal NVIDIA NIM API'ye geçiş yapılıyor!`);
+              const fastNv = await attemptNvidiaVision();
+              if (fastNv) return fastNv;
+            }
           } else {
             allRateLimited = false;
           }
@@ -2810,33 +2896,13 @@ async function executeVisionWithFallback(
     }
   }
 
-  // 2. NVIDIA NIM Vision Failover (Llama 3.2 90B/11B Vision, Qwen 2.5 VL 72B)
-  const nvidiaKey = process.env.NVIDIA_API_KEY || "";
-  if (nvidiaKey && nvidiaKey.trim().length > 0) {
-    try {
-      console.log(`[Vision Failover] 🚀 NVIDIA NIM Vision ile soru analizi deneniyor...`);
-      const nvText = await callNvidiaVision(nvidiaKey, {
-        prompt: params.prompt,
-        mimeType: params.mimeType,
-        cleanBase64: params.cleanBase64,
-        temperature: params.temperature,
-      });
-      if (nvText && nvText.trim().length > 0) {
-        console.log(`[Vision Failover] ✅ NVIDIA NIM Vision başarıyla sonuç üretti!`);
-        addSystemLog({
-          level: "success",
-          source: "nvidia",
-          message: `✅ Optik görsel soru analizi başarılı: NVIDIA NIM Vision yanıt verdi.`,
-          model: "meta/llama-3.2-90b-vision-instruct",
-        });
-        return { text: nvText, usedModel: "nvidia/llama-3.2-90b-vision" };
-      }
-    } catch (nvErr: any) {
-      console.warn(`[Vision Failover] ⚠️ NVIDIA NIM Vision başarısız oldu:`, nvErr?.message || nvErr);
-    }
+  // 3. NVIDIA NIM Vision Failover (if not tried first)
+  if (!tryNvidiaFirst && nvidiaKey) {
+    const nvResult = await attemptNvidiaVision();
+    if (nvResult) return nvResult;
   }
 
-  // 3. Grok / OpenAI / OpenRouter Fallbacks
+  // 4. Grok / OpenAI / OpenRouter Fallbacks
   const grokKey = process.env.GROK_API_KEY || process.env.XAI_API_KEY || "";
   if (grokKey && grokKey.trim().length > 0) {
     try {
@@ -2893,12 +2959,57 @@ async function executeTextWithFallback(
   const contents: any = params.parts && params.parts.length > 0 ? [{ parts: params.parts }] : (params.prompt || "");
   const effectiveTimeout = params.timeoutMs || 30000;
 
+  const nvidiaKey = getNvidiaApiKey();
+  const preferredProvider = (process.env.PREFERRED_AI_PROVIDER || (nvidiaKey ? "nvidia" : "gemini")).toLowerCase().trim();
+  const tryNvidiaFirst = Boolean(nvidiaKey && nvidiaKey.length > 5 && preferredProvider === "nvidia");
+
+  const attemptNvidiaChat = async (): Promise<{ text: string; usedModel: string } | null> => {
+    if (!nvidiaKey) return null;
+    try {
+      console.log(`[Text] 🚀 NVIDIA NIM (Nemotron / DeepSeek R1) ile çözüm/metin üretiliyor...`);
+      const nvText = await callNvidiaChat(nvidiaKey, {
+        prompt: params.prompt || "",
+        systemInstruction: params.systemInstruction,
+        temperature: params.temperature,
+      });
+      if (nvText && nvText.trim().length > 0) {
+        return { text: nvText, usedModel: "nvidia/llama-3.1-nemotron-70b" };
+      }
+    } catch (nvErr: any) {
+      console.warn(`[Text] ⚠️ NVIDIA NIM başarısız oldu:`, nvErr?.message || nvErr);
+    }
+    return null;
+  };
+
+  // 1. If NVIDIA is preferred or configured, try NVIDIA NIM FIRST!
+  if (tryNvidiaFirst) {
+    const nvResult = await attemptNvidiaChat();
+    if (nvResult) return nvResult;
+    console.warn(`[Text Failover] NVIDIA NIM başarısız oldu, Gemini metin modellerine geçiliyor...`);
+  }
+
+  // 2. Google Gemini Text Cascade
   const candidateSlots = getGeminiCandidateClients();
   const slotsToTry = candidateSlots.length > 0 ? candidateSlots : (ai ? [{ client: ai, maskedKey: "Default" }] : []);
   const { activeList } = getSortedModelList(FLASH_TEXT_CASCADE);
 
   for (let i = 0; i < activeList.length; i++) {
     const modelName = activeList[i];
+
+    // If all candidate slots are in cooldown, don't waste time trying all remaining text models!
+    const availableSlots = slotsToTry.filter(s => {
+      const slotObj = geminiKeySlots.find(sl => sl.client === s.client);
+      return !slotObj || slotObj.cooldownUntil <= Date.now();
+    });
+    if (slotsToTry.length > 0 && availableSlots.length === 0) {
+      console.warn(`[Gemini Text Failover] ⚠️ Tüm Gemini anahtarları 429 kota beklemesinde, kalan modeller atlanıyor...`);
+      if (nvidiaKey) {
+        const fastNv = await attemptNvidiaChat();
+        if (fastNv) return fastNv;
+      }
+      break;
+    }
+
     for (let k = 0; k < slotsToTry.length; k++) {
       const { client, maskedKey } = slotsToTry[k];
       try {
@@ -2940,22 +3051,10 @@ async function executeTextWithFallback(
     }
   }
 
-  // NVIDIA NIM Reasoning Fallback (DeepSeek R1 / Llama 3.3 70B)
-  const nvidiaKey = process.env.NVIDIA_API_KEY || "";
-  if (nvidiaKey && nvidiaKey.trim().length > 0) {
-    try {
-      console.log(`[Text Failover] 🚀 NVIDIA NIM (DeepSeek R1 / Llama 3.3) deneniyor...`);
-      const nvText = await callNvidiaChat(nvidiaKey, {
-        prompt: params.prompt || "",
-        systemInstruction: params.systemInstruction,
-        temperature: params.temperature,
-      });
-      if (nvText && nvText.trim().length > 0) {
-        return { text: nvText, usedModel: "nvidia/deepseek-r1" };
-      }
-    } catch (nvErr: any) {
-      console.warn(`[Text Failover] ⚠️ NVIDIA NIM başarısız oldu:`, nvErr?.message || nvErr);
-    }
+  // 3. NVIDIA NIM Fallback (if not tried first)
+  if (!tryNvidiaFirst && nvidiaKey) {
+    const nvResult = await attemptNvidiaChat();
+    if (nvResult) return nvResult;
   }
 
   throw lastError || new Error("Tüm yapay zekâ metin modelleri başarısız oldu.");
