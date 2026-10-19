@@ -2232,21 +2232,26 @@ async function runLiveModelHealthCheck(force = false): Promise<LiveModelHealthIn
   return Array.from(verifiedLiveModelsMap.values());
 }
 
-// Helper: Call NVIDIA NIM Vision API (Llama 3.2 90B/11B Vision, Qwen 2.5 VL 72B, Phi-3.5 Vision)
+// Helper: Call NVIDIA NIM Vision API (Llama 3.2 11B Vision, Nemotron Nano Omni 30B, Nemotron Super VL 120B, Llama 3.2 90B)
 async function callNvidiaVision(
   apiKey: string,
   params: { prompt: string; mimeType: string; cleanBase64: string; temperature?: number }
 ): Promise<string> {
+  // Verified active models on NVIDIA NIM for this key:
+  // meta/llama-3.2-11b-vision-instruct is ultra fast (1-2s OCR & question detection)
+  // nvidia/nemotron-3-nano-omni-30b-a3b-reasoning is multimodal reasoning model
+  // nvidia/nemotron-3.5-super-vl-120b-a12b is high-capacity vision model
   const models = [
-    "meta/llama-3.2-90b-vision-instruct",
     "meta/llama-3.2-11b-vision-instruct",
-    "qwen/qwen2.5-vl-72b-instruct",
-    "microsoft/phi-3.5-vision-instruct",
+    "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+    "nvidia/nemotron-3.5-super-vl-120b-a12b",
+    "meta/llama-3.2-90b-vision-instruct",
   ];
 
   for (const model of models) {
+    const t0 = Date.now();
     try {
-      console.log(`[NVIDIA NIM Vision] Deneniyor: ${model}...`);
+      console.log(`[NVIDIA NIM Vision] 🚀 Deneniyor: ${model}...`);
       const res = await withTimeout(
         fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
           method: "POST",
@@ -2272,10 +2277,10 @@ async function callNvidiaVision(
               },
             ],
             temperature: params.temperature ?? 0.1,
-            max_tokens: 4096,
+            max_tokens: 2500,
           }),
         }),
-        35000,
+        80000,
         `NVIDIA NIM Vision (${model}) zaman aşımına uğradı.`
       );
 
@@ -2283,33 +2288,36 @@ async function callNvidiaVision(
         const json: any = await res.json();
         const content = json.choices?.[0]?.message?.content;
         if (content && content.trim().length > 0) {
+          console.log(`[NVIDIA NIM Vision] ✅ ${model} başarıyla yanıt verdi (${Date.now() - t0}ms)`);
           return content.trim();
         }
       } else {
         const errJson = await res.json().catch(() => ({}));
-        console.warn(`[NVIDIA NIM Vision] ${model} hata:`, res.status, errJson);
+        console.warn(`[NVIDIA NIM Vision] ⚠️ ${model} hata:`, res.status, errJson);
       }
     } catch (err: any) {
-      console.warn(`[NVIDIA NIM Vision] ${model} başarısız:`, err?.message || err);
+      console.warn(`[NVIDIA NIM Vision] ❌ ${model} başarısız (${Date.now() - t0}ms):`, err?.message || err);
     }
   }
   throw new Error("NVIDIA NIM Vision modelleri yanıt vermedi.");
 }
 
-// Helper: Call NVIDIA NIM Reasoning / Text (Nemotron 70B, DeepSeek R1 & Llama 3.3 70B)
+// Helper: Call NVIDIA NIM Reasoning / Text (Nemotron Omni 30B, Nemotron Super 120B, Nemotron Ultra 550B)
 async function callNvidiaChat(
   apiKey: string,
   params: { prompt: string; systemInstruction?: string; temperature?: number }
 ): Promise<string> {
   const models = [
-    "nvidia/llama-3.1-nemotron-70b-instruct",
-    "deepseek-ai/deepseek-r1",
-    "meta/llama-3.3-70b-instruct",
+    "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+    "nvidia/nemotron-3-super-120b-a12b",
+    "nvidia/nemotron-3-ultra-550b-a55b",
+    "meta/llama-3.2-11b-vision-instruct",
   ];
 
   for (const model of models) {
+    const t0 = Date.now();
     try {
-      console.log(`[NVIDIA NIM Chat/Reasoning] Deneniyor: ${model}...`);
+      console.log(`[NVIDIA NIM Chat/Reasoning] 🚀 Deneniyor: ${model}...`);
       const messages = [
         ...(params.systemInstruction
           ? [{ role: "system", content: params.systemInstruction }]
@@ -2329,10 +2337,10 @@ async function callNvidiaChat(
             model,
             messages,
             temperature: params.temperature ?? 0.2,
-            max_tokens: 4096,
+            max_tokens: 3000,
           }),
         }),
-        45000,
+        60000,
         `NVIDIA NIM Chat (${model}) zaman aşımına uğradı.`
       );
 
@@ -2340,11 +2348,15 @@ async function callNvidiaChat(
         const json: any = await res.json();
         const content = json.choices?.[0]?.message?.content;
         if (content && content.trim().length > 0) {
+          console.log(`[NVIDIA NIM Chat] ✅ ${model} başarıyla yanıt verdi (${Date.now() - t0}ms)`);
           return content.trim();
         }
+      } else {
+        const errJson = await res.json().catch(() => ({}));
+        console.warn(`[NVIDIA NIM Chat] ⚠️ ${model} hata:`, res.status, errJson);
       }
     } catch (err: any) {
-      console.warn(`[NVIDIA NIM Chat] ${model} başarısız:`, err?.message || err);
+      console.warn(`[NVIDIA NIM Chat] ❌ ${model} başarısız (${Date.now() - t0}ms):`, err?.message || err);
     }
   }
   throw new Error("NVIDIA NIM metin/akıl yürütme modelleri yanıt vermedi.");
@@ -2741,13 +2753,14 @@ async function executeVisionWithFallback(
   let allRateLimited = true;
 
   const nvidiaKey = getNvidiaApiKey();
+  let candidateSlots = getGeminiCandidateClients();
   const preferredProvider = (process.env.PREFERRED_AI_PROVIDER || (nvidiaKey ? "nvidia" : "gemini")).toLowerCase().trim();
-  const tryNvidiaFirst = Boolean(nvidiaKey && nvidiaKey.length > 5 && preferredProvider === "nvidia");
+  const tryNvidiaFirst = Boolean(nvidiaKey && nvidiaKey.length > 5 && (preferredProvider === "nvidia" || candidateSlots.length === 0));
 
   const attemptNvidiaVision = async (): Promise<{ text: string; usedModel: string } | null> => {
     if (!nvidiaKey) return null;
     try {
-      console.log(`[Vision] 🚀 NVIDIA NIM Vision ile soru analizi deneniyor (Llama 3.2 90B / Nemotron)...`);
+      console.log(`[Vision] 🚀 NVIDIA NIM Vision ile soru analizi deneniyor (Llama 3.2 11B / Nemotron)...`);
       const nvText = await callNvidiaVision(nvidiaKey, {
         prompt: params.prompt,
         mimeType: params.mimeType,
@@ -2760,9 +2773,9 @@ async function executeVisionWithFallback(
           level: "success",
           source: "nvidia",
           message: `✅ Optik görsel soru analizi başarılı: NVIDIA NIM Vision yanıt verdi.`,
-          model: "meta/llama-3.2-90b-vision-instruct",
+          model: "meta/llama-3.2-11b-vision-instruct",
         });
-        return { text: nvText, usedModel: "nvidia/llama-3.2-90b-vision" };
+        return { text: nvText, usedModel: "nvidia/llama-3.2-11b-vision" };
       }
     } catch (nvErr: any) {
       console.warn(`[Vision] ⚠️ NVIDIA NIM Vision başarısız oldu:`, nvErr?.message || nvErr);
@@ -2779,7 +2792,7 @@ async function executeVisionWithFallback(
   }
 
   // 2. Google Gemini Flash & Pro Models (Active & non-cooling across all API Key slots)
-  const candidateSlots = getGeminiCandidateClients();
+  candidateSlots = getGeminiCandidateClients();
   if (candidateSlots.length > 0) {
     const { activeList } = getSortedModelList(FLASH_VISION_CASCADE);
     let consecutiveKeyQuotas = 0;
@@ -3885,14 +3898,14 @@ app.post("/api/ai/analyze-exam-photo", async (req, res) => {
     const allDbCurriculum = await fetchDbCurriculumItems();
     const curriculumToUse = (existingCurriculum && existingCurriculum.length > 0) ? existingCurriculum : allDbCurriculum;
 
-    if (!ai) {
+    if (!ai && !getNvidiaApiKey()) {
       const simulated = generateSimulatedExamAnalysis();
       const matched = matchQuestionsWithDbCurriculum(simulated, curriculumToUse);
       return res.json({
         success: true,
         source: "simulated-analysis-no-key",
         sorular: matched,
-        warning: "Gemini API anahtarı ayarlanmadığı için simülasyon modu ile çözüldü.",
+        warning: "Yapay zeka API anahtarı ayarlanmadığı için simülasyon modu ile çözüldü.",
       });
     }
 
@@ -3985,7 +3998,11 @@ Yanıt formatı SADECE geçerli bir JSON dizisi olmalıdır:
     "cozumDetayi": "x = v0*t + 1/2*a*t^2 formülünden doğru cevap B seçeneğidir.",
     "analizNotu": "Öğrenci bu soruyu boş bırakmıştır."
   }
-]`;
+]
+ÖNEMLİ PERFORMANS VE FORMAT TALİMATI:
+- Yanıt olarak SADECE geçerli bir JSON dizisi [...] döndür (başka hiçbir metin veya açıklama ekleme).
+- Çözüm detayını (cozumDetayi) ve analiz notunu (analizNotu) her soru için en fazla 1-2 cümle ile net ve kısa tut.
+`;
 
     const { text: rawText, usedModel } = await executeVisionWithFallback(ai, {
       prompt,
@@ -4066,7 +4083,7 @@ app.post("/api/vision/detect-orientation-ocr", async (req, res) => {
     }
     const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, "");
     const ai = getGeminiClient();
-    if (!ai) {
+    if (!ai && !getNvidiaApiKey()) {
       return res.status(500).json({ success: false, error: "Yapay zeka istemcisi hazır değil." });
     }
 
@@ -4138,11 +4155,11 @@ app.post("/api/ai/detect-question-boxes", async (req, res) => {
     const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, "");
     const ai = getGeminiClient();
 
-    if (!ai) {
+    if (!ai && !getNvidiaApiKey()) {
       return res.json({
         success: false,
         boxes: [],
-        message: "Gemini API anahtarı ayarlanmamış.",
+        message: "Yapay zeka API anahtarı ayarlanmamış.",
       });
     }
 
@@ -5628,7 +5645,7 @@ app.post("/api/archives/:id/reanalyze-page", async (req, res) => {
   }
 
   const ai = getGeminiClient();
-  if (!ai) {
+  if (!ai && !getNvidiaApiKey()) {
     return res.status(500).json({ success: false, message: "Yapay zekâ istemcisi hazır değil." });
   }
 
@@ -5682,6 +5699,7 @@ Sana verilen bu test / sınav sayfası görselindeki (${sinavTuru}, Sayfa ${page
     - Soru numarasını, metnini, şeklini ve tüm şıklarını içine alacak şekilde tam dikdörtgen sınırlarını ver.
 
 Yanıt formatı SADECE geçerli bir JSON dizisi [...] olmalıdır.
+ÖNEMLİ PERFORMANS TALİMATI: Çözüm detayını (cozumDetayi) ve analiz notunu (analizNotu) her soru için en fazla 1-2 cümle ile net ve kısa tut, gereksiz uzun açıklama yapma.
 `;
 
   try {
