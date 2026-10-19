@@ -2296,12 +2296,13 @@ async function callNvidiaVision(
   throw new Error("NVIDIA NIM Vision modelleri yanıt vermedi.");
 }
 
-// Helper: Call NVIDIA NIM Reasoning / Text (DeepSeek R1 & Llama 3.3 70B)
+// Helper: Call NVIDIA NIM Reasoning / Text (Nemotron 70B, DeepSeek R1 & Llama 3.3 70B)
 async function callNvidiaChat(
   apiKey: string,
   params: { prompt: string; systemInstruction?: string; temperature?: number }
 ): Promise<string> {
   const models = [
+    "nvidia/llama-3.1-nemotron-70b-instruct",
     "deepseek-ai/deepseek-r1",
     "meta/llama-3.3-70b-instruct",
   ];
