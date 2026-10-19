@@ -623,11 +623,12 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
                 <span className="truncate">Atanan Kaynaklar</span>
               </div>
               {pendingAssignedResources.length > 0 ? (
-                <span className="text-[10px] px-1.5 py-0.2 rounded-full font-black bg-rose-500 text-white animate-pulse shrink-0">
-                  {pendingAssignedResources.length} Bekleyen
+                <span className="text-[10px] px-2 py-0.5 rounded-full font-black bg-rose-500 text-white shadow-xs shrink-0 flex items-center gap-1 animate-pulse">
+                  <span>{pendingAssignedResources.length}</span>
+                  <span className="hidden xl:inline">Bekleyen</span>
                 </span>
               ) : myAssignedResources.length > 0 ? (
-                <span className="text-[10px] px-1.5 py-0.2 rounded-full font-bold bg-slate-200 text-slate-700 shrink-0">
+                <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-slate-200 text-slate-700 shrink-0">
                   {myAssignedResources.length}
                 </span>
               ) : null}
@@ -640,11 +641,11 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
       <div className="md:hidden">
         <div className="fixed bottom-0 inset-x-0 bg-white/95 backdrop-blur-md border-t border-slate-200/80 shadow-lg z-45 py-2 px-3 pb-safe-bottom flex items-center justify-around">
           {[
-            { key: 'testler', label: 'Testlerim', icon: Camera, badge: myArchives.length > 0 ? myArchives.length : undefined },
-            { key: 'atanan-kaynaklar', label: 'Kaynaklar', icon: BookOpen, badge: pendingAssignedResources.length > 0 ? pendingAssignedResources.length : undefined },
-            { key: 'hedefler', label: 'Hedeflerim', icon: Target, badge: myNotes.length > 0 ? myNotes.length : undefined },
-            { key: 'soru-takibi', label: 'Soru Takip', icon: HelpCircle, badge: myQuestions.length > 0 ? myQuestions.length : undefined },
-            { key: 'haftalik-program', label: 'Programım', icon: CalendarDays, badge: portalSchedules.length > 0 ? portalSchedules.length : undefined },
+            { key: 'testler', label: 'Testlerim', icon: Camera, badge: myArchives.length > 0 ? `${myArchives.length}` : undefined },
+            { key: 'atanan-kaynaklar', label: 'Kaynaklar', icon: BookOpen, badge: pendingAssignedResources.length > 0 ? `${pendingAssignedResources.length}` : (myAssignedResources.length > 0 ? `${myAssignedResources.length}` : undefined) },
+            { key: 'hedefler', label: 'Hedeflerim', icon: Target, badge: myNotes.length > 0 ? `${myNotes.length}` : undefined },
+            { key: 'soru-takibi', label: 'Soru Takip', icon: HelpCircle, badge: myQuestions.length > 0 ? `${myQuestions.length}` : undefined },
+            { key: 'haftalik-program', label: 'Programım', icon: CalendarDays, badge: portalSchedules.length > 0 ? `${portalSchedules.length}` : undefined },
           ].map((item) => {
             const ItemIcon = item.icon;
             const isActive = activePortalTab === item.key;
@@ -659,7 +660,11 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
                 <div className="relative">
                   <ItemIcon className={`w-5 h-5 ${isActive ? 'stroke-[2.5px] text-indigo-600' : 'stroke-[2px]'}`} />
                   {item.badge && (
-                    <span className="absolute -top-1.5 -right-2 bg-indigo-600 text-white text-[8px] font-bold px-1.5 py-0.2 rounded-full border border-white">
+                    <span className={`absolute -top-1.5 -right-2 text-white text-[8px] font-black px-1.5 py-0.2 rounded-full border border-white ${
+                      item.key === 'atanan-kaynaklar' && pendingAssignedResources.length > 0
+                        ? 'bg-rose-500 animate-pulse'
+                        : 'bg-indigo-600'
+                    }`}>
                       {item.badge}
                     </span>
                   )}
@@ -673,6 +678,38 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
 
       {/* Main Student Page Body */}
       <main className="flex-1 max-w-5xl w-full mx-auto px-4 sm:px-6 py-6 pb-20 md:pb-6 space-y-6">
+        
+        {/* New / Pending Assigned Resources Banner Alert */}
+        {pendingAssignedResources.length > 0 && activePortalTab !== 'atanan-kaynaklar' && (
+          <div 
+            onClick={() => setActivePortalTab('atanan-kaynaklar')}
+            className="p-3.5 sm:p-4 rounded-2xl bg-gradient-to-r from-indigo-900 via-indigo-800 to-slate-900 text-white border border-indigo-500/30 shadow-md flex items-center justify-between gap-3 cursor-pointer hover:border-indigo-400 transition-all group animate-in slide-in-from-top-2 duration-300"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-indigo-500/30 text-indigo-300 flex items-center justify-center border border-indigo-400/30 shrink-0 relative">
+                <BookOpen className="w-5 h-5" />
+                <span className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-rose-500 text-white text-[10px] font-black rounded-full flex items-center justify-center animate-pulse shadow-xs">
+                  {pendingAssignedResources.length}
+                </span>
+              </div>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h4 className="text-xs sm:text-sm font-black text-white">Koçunun Sana Atadığı Kaynaklar Var!</h4>
+                  <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-rose-500 text-white animate-pulse">
+                    {pendingAssignedResources.length} Bekleyen Kaynak
+                  </span>
+                </div>
+                <p className="text-[11px] text-indigo-200 mt-0.5">
+                  Koçun tarafından çözmen için atanan kitapları ve hedef süreleri incelemek için buraya tıkla.
+                </p>
+              </div>
+            </div>
+            <button className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white text-indigo-950 font-black text-xs group-hover:bg-indigo-50 transition-colors shrink-0">
+              <span>Kaynakları Gör</span>
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
+        )}
         
         {/* =========================================================
             TAB 2: TEST YÜKLEME & YAPAY ZEKÂ ÇÖZÜMLERİ

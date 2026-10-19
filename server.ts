@@ -1946,7 +1946,7 @@ interface SystemLogEntry {
   id: string;
   timestamp: string;
   level: 'info' | 'warn' | 'error' | 'success';
-  source: 'ai_worker' | 'gemini' | 'db' | 'api';
+  source: 'ai_worker' | 'gemini' | 'db' | 'api' | 'nvidia';
   message: string;
   details?: string;
   archiveId?: string;
@@ -2005,7 +2005,7 @@ let primaryWorkingModel: string | null = null;
 
 export interface LiveModelHealthInfo {
   model: string;
-  provider: 'gemini' | 'grok' | 'openai' | 'groq' | 'openrouter';
+  provider: 'gemini' | 'grok' | 'openai' | 'groq' | 'openrouter' | 'nvidia';
   status: 'ok' | 'rate_limited' | 'error';
   isAlive: boolean;
   latencyMs: number;
@@ -2082,6 +2082,7 @@ async function runLiveModelHealthCheck(force = false): Promise<LiveModelHealthIn
   console.log(`[Live Model Health Checker] 🔄 Canlı model kontrolleri başlatılıyor (1 dakikada bir otomatik güncelleme)...`);
 
   const geminiAi = getGeminiClient();
+  const nvidiaKey = process.env.NVIDIA_API_KEY || "";
   const grokKey = process.env.GROK_API_KEY || process.env.XAI_API_KEY || "";
   const openaiKey = process.env.OPENAI_API_KEY || "";
   const groqKey = process.env.GROQ_API_KEY || "";
@@ -2156,6 +2157,63 @@ async function runLiveModelHealthCheck(force = false): Promise<LiveModelHealthIn
     }
   }
 
+  // 2. Test NVIDIA NIM Models (Llama 3.2 90B Vision & DeepSeek R1)
+  if (nvidiaKey && nvidiaKey.trim().length > 0) {
+    const nvidiaTestModels = [
+      "meta/llama-3.2-90b-vision-instruct",
+      "deepseek-ai/deepseek-r1"
+    ];
+    for (const model of nvidiaTestModels) {
+      checkPromises.push((async () => {
+        const t0 = Date.now();
+        try {
+          const res = await withTimeout(
+            fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
+              method: "POST",
+              headers: {
+                "Authorization": `Bearer ${nvidiaKey}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                model,
+                messages: [{ role: "user", content: "ping" }],
+                max_tokens: 5,
+              }),
+            }),
+            8000,
+            `${model} 8sn zaman aşımı`
+          );
+          const latency = Date.now() - t0;
+          const ok = res.ok;
+          const info: LiveModelHealthInfo = {
+            model: `nvidia/${model}`,
+            provider: 'nvidia',
+            status: ok ? 'ok' : 'error',
+            isAlive: ok,
+            latencyMs: latency,
+            lastCheckedAt: now,
+            message: ok ? 'NVIDIA NIM Canlı ve Hazır' : `HTTP ${res.status}`
+          };
+          verifiedLiveModelsMap.set(`nvidia/${model}`, info);
+          return info;
+        } catch (err: any) {
+          const latency = Date.now() - t0;
+          const info: LiveModelHealthInfo = {
+            model: `nvidia/${model}`,
+            provider: 'nvidia',
+            status: 'error',
+            isAlive: false,
+            latencyMs: latency,
+            lastCheckedAt: now,
+            message: (err?.message || String(err)).slice(0, 150)
+          };
+          verifiedLiveModelsMap.set(`nvidia/${model}`, info);
+          return info;
+        }
+      })());
+    }
+  }
+
   await Promise.allSettled(checkPromises);
   isHealthChecking = false;
   lastLiveHealthCheckTimestamp = Date.now();
@@ -2172,6 +2230,123 @@ async function runLiveModelHealthCheck(force = false): Promise<LiveModelHealthIn
   });
 
   return Array.from(verifiedLiveModelsMap.values());
+}
+
+// Helper: Call NVIDIA NIM Vision API (Llama 3.2 90B/11B Vision, Qwen 2.5 VL 72B, Phi-3.5 Vision)
+async function callNvidiaVision(
+  apiKey: string,
+  params: { prompt: string; mimeType: string; cleanBase64: string; temperature?: number }
+): Promise<string> {
+  const models = [
+    "meta/llama-3.2-90b-vision-instruct",
+    "meta/llama-3.2-11b-vision-instruct",
+    "qwen/qwen2.5-vl-72b-instruct",
+    "microsoft/phi-3.5-vision-instruct",
+  ];
+
+  for (const model of models) {
+    try {
+      console.log(`[NVIDIA NIM Vision] Deneniyor: ${model}...`);
+      const res = await withTimeout(
+        fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+          },
+          body: JSON.stringify({
+            model,
+            messages: [
+              {
+                role: "user",
+                content: [
+                  { type: "text", text: params.prompt },
+                  {
+                    type: "image_url",
+                    image_url: {
+                      url: `data:${params.mimeType};base64,${params.cleanBase64}`,
+                    },
+                  },
+                ],
+              },
+            ],
+            temperature: params.temperature ?? 0.1,
+            max_tokens: 4096,
+          }),
+        }),
+        35000,
+        `NVIDIA NIM Vision (${model}) zaman aşımına uğradı.`
+      );
+
+      if (res.ok) {
+        const json: any = await res.json();
+        const content = json.choices?.[0]?.message?.content;
+        if (content && content.trim().length > 0) {
+          return content.trim();
+        }
+      } else {
+        const errJson = await res.json().catch(() => ({}));
+        console.warn(`[NVIDIA NIM Vision] ${model} hata:`, res.status, errJson);
+      }
+    } catch (err: any) {
+      console.warn(`[NVIDIA NIM Vision] ${model} başarısız:`, err?.message || err);
+    }
+  }
+  throw new Error("NVIDIA NIM Vision modelleri yanıt vermedi.");
+}
+
+// Helper: Call NVIDIA NIM Reasoning / Text (DeepSeek R1 & Llama 3.3 70B)
+async function callNvidiaChat(
+  apiKey: string,
+  params: { prompt: string; systemInstruction?: string; temperature?: number }
+): Promise<string> {
+  const models = [
+    "deepseek-ai/deepseek-r1",
+    "meta/llama-3.3-70b-instruct",
+  ];
+
+  for (const model of models) {
+    try {
+      console.log(`[NVIDIA NIM Chat/Reasoning] Deneniyor: ${model}...`);
+      const messages = [
+        ...(params.systemInstruction
+          ? [{ role: "system", content: params.systemInstruction }]
+          : []),
+        { role: "user", content: params.prompt },
+      ];
+
+      const res = await withTimeout(
+        fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+          },
+          body: JSON.stringify({
+            model,
+            messages,
+            temperature: params.temperature ?? 0.2,
+            max_tokens: 4096,
+          }),
+        }),
+        45000,
+        `NVIDIA NIM Chat (${model}) zaman aşımına uğradı.`
+      );
+
+      if (res.ok) {
+        const json: any = await res.json();
+        const content = json.choices?.[0]?.message?.content;
+        if (content && content.trim().length > 0) {
+          return content.trim();
+        }
+      }
+    } catch (err: any) {
+      console.warn(`[NVIDIA NIM Chat] ${model} başarısız:`, err?.message || err);
+    }
+  }
+  throw new Error("NVIDIA NIM metin/akıl yürütme modelleri yanıt vermedi.");
 }
 
 // Helper: Call xAI Grok Vision API (grok-2-vision-1212 / grok-vision-beta)
@@ -2634,13 +2809,70 @@ async function executeVisionWithFallback(
     }
   }
 
-  // If all Gemini models failed, rethrow error to trigger cooldown / queue retry
+  // 2. NVIDIA NIM Vision Failover (Llama 3.2 90B/11B Vision, Qwen 2.5 VL 72B)
+  const nvidiaKey = process.env.NVIDIA_API_KEY || "";
+  if (nvidiaKey && nvidiaKey.trim().length > 0) {
+    try {
+      console.log(`[Vision Failover] 🚀 NVIDIA NIM Vision ile soru analizi deneniyor...`);
+      const nvText = await callNvidiaVision(nvidiaKey, {
+        prompt: params.prompt,
+        mimeType: params.mimeType,
+        cleanBase64: params.cleanBase64,
+        temperature: params.temperature,
+      });
+      if (nvText && nvText.trim().length > 0) {
+        console.log(`[Vision Failover] ✅ NVIDIA NIM Vision başarıyla sonuç üretti!`);
+        addSystemLog({
+          level: "success",
+          source: "nvidia",
+          message: `✅ Optik görsel soru analizi başarılı: NVIDIA NIM Vision yanıt verdi.`,
+          model: "meta/llama-3.2-90b-vision-instruct",
+        });
+        return { text: nvText, usedModel: "nvidia/llama-3.2-90b-vision" };
+      }
+    } catch (nvErr: any) {
+      console.warn(`[Vision Failover] ⚠️ NVIDIA NIM Vision başarısız oldu:`, nvErr?.message || nvErr);
+    }
+  }
+
+  // 3. Grok / OpenAI / OpenRouter Fallbacks
+  const grokKey = process.env.GROK_API_KEY || process.env.XAI_API_KEY || "";
+  if (grokKey && grokKey.trim().length > 0) {
+    try {
+      const grokText = await callGrokVision(grokKey, params);
+      if (grokText) return { text: grokText, usedModel: "xai/grok-vision" };
+    } catch (grokErr) {
+      console.warn(`[Vision Failover] Grok hatası:`, grokErr);
+    }
+  }
+
+  const openaiKey = process.env.OPENAI_API_KEY || "";
+  if (openaiKey && openaiKey.trim().length > 0) {
+    try {
+      const openaiText = await callOpenAIVision(openaiKey, params);
+      if (openaiText) return { text: openaiText, usedModel: "openai/gpt-4o" };
+    } catch (oaErr) {
+      console.warn(`[Vision Failover] OpenAI hatası:`, oaErr);
+    }
+  }
+
+  const openrouterKey = process.env.OPENROUTER_API_KEY || "";
+  if (openrouterKey && openrouterKey.trim().length > 0) {
+    try {
+      const routerText = await callOpenRouterVision(openrouterKey, params);
+      if (routerText) return { text: routerText, usedModel: "openrouter/vision" };
+    } catch (rtErr) {
+      console.warn(`[Vision Failover] OpenRouter hatası:`, rtErr);
+    }
+  }
+
+  // If all Gemini and fallback models failed, rethrow error to trigger cooldown / queue retry
   if (lastError) {
     (lastError as any).allModelsRateLimited = allRateLimited;
     throw lastError;
   }
 
-  throw new Error("Tüm Gemini modelleri ve API anahtarları meşgul veya kota sınırında.");
+  throw new Error("Tüm yapay zekâ görme modelleri ve API anahtarları meşgul veya kota sınırında.");
 }
 
 // Helper: Run Text Generation with Automatic Model Failover
@@ -2707,7 +2939,25 @@ async function executeTextWithFallback(
     }
   }
 
-  throw lastError || new Error("Tüm Gemini metin modelleri başarısız oldu.");
+  // NVIDIA NIM Reasoning Fallback (DeepSeek R1 / Llama 3.3 70B)
+  const nvidiaKey = process.env.NVIDIA_API_KEY || "";
+  if (nvidiaKey && nvidiaKey.trim().length > 0) {
+    try {
+      console.log(`[Text Failover] 🚀 NVIDIA NIM (DeepSeek R1 / Llama 3.3) deneniyor...`);
+      const nvText = await callNvidiaChat(nvidiaKey, {
+        prompt: params.prompt || "",
+        systemInstruction: params.systemInstruction,
+        temperature: params.temperature,
+      });
+      if (nvText && nvText.trim().length > 0) {
+        return { text: nvText, usedModel: "nvidia/deepseek-r1" };
+      }
+    } catch (nvErr: any) {
+      console.warn(`[Text Failover] ⚠️ NVIDIA NIM başarısız oldu:`, nvErr?.message || nvErr);
+    }
+  }
+
+  throw lastError || new Error("Tüm yapay zekâ metin modelleri başarısız oldu.");
 }
 
 // Health check endpoint
@@ -5419,6 +5669,7 @@ Yanıt formatı SADECE geçerli bir JSON dizisi [...] olmalıdır.
 // 1. Get Live AI Status, Active Queue, Recent System Logs & Problematic Tests
 app.get("/api/system/status", (req, res) => {
   const geminiKey = process.env.GEMINI_API_KEY || "";
+  const nvidiaKey = process.env.NVIDIA_API_KEY || "";
   const grokKey = process.env.GROK_API_KEY || process.env.XAI_API_KEY || "";
   const openaiKey = process.env.OPENAI_API_KEY || "";
   const groqKey = process.env.GROQ_API_KEY || "";
@@ -5452,6 +5703,7 @@ app.get("/api/system/status", (req, res) => {
       successCount: s.successCount,
       failureCount: s.failureCount,
     })),
+    nvidiaKeyPresent: Boolean(nvidiaKey && nvidiaKey.trim().length > 0),
     grokKeyPresent: Boolean(grokKey && grokKey.trim().length > 0),
     openaiKeyPresent: Boolean(openaiKey && openaiKey.trim().length > 0),
     groqKeyPresent: Boolean(groqKey && groqKey.trim().length > 0),

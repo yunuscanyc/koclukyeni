@@ -737,6 +737,17 @@ export default function App() {
     }
   };
 
+  const handleUpdateAssignedResource = async (updatedItem: StudentAssignedResource) => {
+    setAssignedResources((prev) =>
+      prev.map((r) => (r.id === updatedItem.id ? updatedItem : r))
+    );
+    try {
+      await saveAssignedResource(updatedItem);
+    } catch (e) {
+      console.warn('saveAssignedResource error:', e);
+    }
+  };
+
   const handleDeleteAssignedResource = async (id: string) => {
     setAssignedResources((prev) => prev.filter((r) => r.id !== id));
     try {
@@ -1360,6 +1371,7 @@ export default function App() {
             onTabChange={(tab) => setActiveTab(tab)}
             onBackToList={() => setViewMode('students')}
             newUploadsCount={studentArchives.filter((a) => a.isNew).length}
+            assignedResourcesCount={assignedResources.filter((r) => r.studentId === activeStudent.id && !r.completed).length}
           >
             {activeTab === 'genel' && (
               <GeneralInfoTab
@@ -1442,6 +1454,7 @@ export default function App() {
                 books={books}
                 assignedResources={assignedResources}
                 onAssignResource={handleAssignResource}
+                onUpdateResource={handleUpdateAssignedResource}
                 onDeleteResource={handleDeleteAssignedResource}
                 onToggleComplete={handleToggleAssignedResourceCompleted}
               />

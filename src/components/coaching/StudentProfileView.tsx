@@ -24,6 +24,7 @@ interface StudentProfileViewProps {
   onTabChange: (tab: StudentProfileTab) => void;
   onBackToList: () => void;
   newUploadsCount?: number;
+  assignedResourcesCount?: number;
   children: React.ReactNode;
 }
 
@@ -33,6 +34,7 @@ export const StudentProfileView: React.FC<StudentProfileViewProps> = ({
   onTabChange,
   onBackToList,
   newUploadsCount = 0,
+  assignedResourcesCount = 0,
   children,
 }) => {
   const tabs: {
@@ -55,7 +57,13 @@ export const StudentProfileView: React.FC<StudentProfileViewProps> = ({
       badge: newUploadsCount > 0 ? `${newUploadsCount} YENİ TEST` : undefined,
       badgeColor: newUploadsCount > 0 ? 'bg-amber-400 text-slate-950 font-black animate-pulse' : undefined
     },
-    { key: 'atanan-kaynaklar', label: '📚 8. Atanan Kaynaklar', icon: BookOpen },
+    { 
+      key: 'atanan-kaynaklar', 
+      label: '📚 8. Atanan Kaynaklar', 
+      icon: BookOpen,
+      badge: assignedResourcesCount > 0 ? `${assignedResourcesCount}` : undefined,
+      badgeColor: assignedResourcesCount > 0 ? 'bg-indigo-600 text-white font-black' : undefined
+    },
   ];
   const [isMoreMenuOpen, setIsMoreMenuOpen] = React.useState(false);
 
@@ -166,7 +174,7 @@ export const StudentProfileView: React.FC<StudentProfileViewProps> = ({
               { key: 'denemeler', label: '5. Denemeler (TYT/AYT)', icon: Award },
               { key: 'raporlar', label: '6. Raporlar & AI Koçluk', icon: BarChart2 },
               { key: 'sinav-gecmisi', label: '📑 7. Sınav Geçmişi & Arşiv', icon: Archive, badge: newUploadsCount > 0 ? `${newUploadsCount} YENİ` : undefined },
-              { key: 'atanan-kaynaklar', label: '📚 8. Atanan Kaynaklar', icon: BookOpen },
+              { key: 'atanan-kaynaklar', label: '📚 8. Atanan Kaynaklar', icon: BookOpen, badge: assignedResourcesCount > 0 ? `${assignedResourcesCount}` : undefined },
             ].map((mTab) => {
               const MIcon = mTab.icon;
               const isActive = activeTab === mTab.key;

@@ -168,7 +168,7 @@ export interface SystemLogEntry {
   id: string;
   timestamp: string;
   level: 'info' | 'warn' | 'error' | 'success';
-  source: 'ai_worker' | 'gemini' | 'db' | 'api';
+  source: 'ai_worker' | 'gemini' | 'db' | 'api' | 'nvidia';
   message: string;
   details?: string;
   archiveId?: string;
@@ -180,7 +180,7 @@ export interface SystemLogEntry {
 
 export interface ModelHealthStatus {
   model: string;
-  provider?: 'gemini' | 'grok' | 'openai' | 'groq' | 'openrouter';
+  provider?: 'gemini' | 'grok' | 'openai' | 'groq' | 'openrouter' | 'nvidia';
   status: 'ok' | 'rate_limited' | 'error' | 'deprecated';
   latencyMs?: number;
   message?: string;
@@ -191,6 +191,7 @@ export interface AiSystemStatus {
   geminiKeyLength: number;
   geminiKeyCount?: number;
   geminiKeys?: Array<{ masked: string; isCooldown: boolean; cooldownSec: number }>;
+  nvidiaKeyPresent?: boolean;
   grokKeyPresent?: boolean;
   openaiKeyPresent?: boolean;
   groqKeyPresent?: boolean;

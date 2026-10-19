@@ -12,7 +12,10 @@ import {
   Tag,
   Check,
   BookmarkCheck,
-  Sparkles
+  Sparkles,
+  Pencil,
+  X,
+  Save
 } from 'lucide-react';
 import { Student, BookResource, StudentAssignedResource, BookDifficulty } from '../../../types';
 import { formatDate } from '../../../utils/dateUtils';
@@ -22,6 +25,7 @@ interface AssignedResourcesTabProps {
   books: BookResource[];
   assignedResources: StudentAssignedResource[];
   onAssignResource: (resource: Omit<StudentAssignedResource, 'id'>) => void;
+  onUpdateResource: (resource: StudentAssignedResource) => void;
   onDeleteResource: (id: string) => void;
   onToggleComplete: (id: string, completed: boolean) => void;
 }
@@ -31,6 +35,7 @@ export const AssignedResourcesTab: React.FC<AssignedResourcesTabProps> = ({
   books = [],
   assignedResources = [],
   onAssignResource,
+  onUpdateResource,
   onDeleteResource,
   onToggleComplete
 }) => {
@@ -48,6 +53,65 @@ export const AssignedResourcesTab: React.FC<AssignedResourcesTabProps> = ({
   const [hedefSoruSayisi, setHedefSoruSayisi] = useState<number | undefined>(undefined);
   const [note, setNote] = useState('');
   const [formError, setFormError] = useState('');
+
+  // Edit Modal State
+  const [editingResource, setEditingResource] = useState<StudentAssignedResource | null>(null);
+  const [editBookName, setEditBookName] = useState('');
+  const [editPublisher, setEditPublisher] = useState('');
+  const [editSubject, setEditSubject] = useState('Matematik');
+  const [editDifficulty, setEditDifficulty] = useState<BookDifficulty>('Orta');
+  const [editTargetDurationDays, setEditTargetDurationDays] = useState<number>(14);
+  const [editTargetDate, setEditTargetDate] = useState<string>('');
+  const [editHedefSoruSayisi, setEditHedefSoruSayisi] = useState<number | undefined>(undefined);
+  const [editNote, setEditNote] = useState('');
+  const [editCompleted, setEditCompleted] = useState<boolean>(false);
+  const [editFormError, setEditFormError] = useState('');
+
+  const handleOpenEdit = (res: StudentAssignedResource) => {
+    setEditingResource(res);
+    setEditBookName(res.bookName);
+    setEditPublisher(res.publisher || '');
+    setEditSubject(res.subject || 'Matematik');
+    setEditDifficulty(res.difficulty || 'Orta');
+    setEditTargetDurationDays(res.targetDurationDays || 14);
+    setEditTargetDate(res.targetDate || '');
+    setEditHedefSoruSayisi(res.hedefSoruSayisi);
+    setEditNote(res.note || '');
+    setEditCompleted(res.completed || false);
+    setEditFormError('');
+  };
+
+  const handleCloseEdit = () => {
+    setEditingResource(null);
+    setEditFormError('');
+  };
+
+  const handleSaveEdit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingResource) return;
+    if (!editBookName.trim()) {
+      setEditFormError('Lütfen atanacak kaynak kitap adını giriniz.');
+      return;
+    }
+
+    onUpdateResource({
+      ...editingResource,
+      bookName: editBookName.trim(),
+      publisher: editPublisher.trim() || 'Genel',
+      subject: editSubject || 'Matematik',
+      difficulty: editDifficulty,
+      targetDurationDays: editTargetDurationDays ? Number(editTargetDurationDays) : undefined,
+      targetDate: editTargetDate || undefined,
+      hedefSoruSayisi: editHedefSoruSayisi ? Number(editHedefSoruSayisi) : undefined,
+      note: editNote.trim(),
+      completed: editCompleted,
+      completedDate: editCompleted
+        ? (editingResource.completedDate || new Date().toISOString().split('T')[0])
+        : undefined
+    });
+
+    setEditingResource(null);
+  };
 
   // Filter student's resources
   const studentResources = assignedResources.filter(r => r.studentId === student.id);
@@ -466,6 +530,15 @@ export const AssignedResourcesTab: React.FC<AssignedResourcesTabProps> = ({
                   </button>
 
                   <button
+                    type="button"
+                    onClick={() => handleOpenEdit(res)}
+                    className="p-1.5 rounded-lg text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 border border-transparent hover:border-indigo-100 transition-all cursor-pointer"
+                    title="Kaynak Atamasını Düzenle"
+                  >
+                    <Pencil className="w-4 h-4" />
+                  </button>
+
+                  <button
                     onClick={() => {
                       if (confirm('Bu kaynak atamasını kaldırmak istediğinize emin misiniz?')) {
                         onDeleteResource(res.id);
@@ -489,6 +562,164 @@ export const AssignedResourcesTab: React.FC<AssignedResourcesTabProps> = ({
           <p className="text-[11px] text-slate-500 mt-1">
             "Yeni Kaynak Ataması Yap" butonuna tıklayarak {student.adSoyad} için çözülmesi gereken kaynak kitap atayabilirsiniz.
           </p>
+        </div>
+      )}
+
+      {/* Edit Assigned Resource Modal */}
+      {editingResource && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/75 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="bg-white border border-slate-200 rounded-3xl max-w-2xl w-full p-5 sm:p-6 shadow-2xl space-y-4 animate-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-indigo-50 border border-indigo-200/60 text-indigo-700 flex items-center justify-center">
+                  <Pencil className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-slate-900">Kaynak Atamasını Düzenle</h3>
+                  <p className="text-[11px] text-slate-500">{student.adSoyad} için atanan kaynağı güncelleyin</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleCloseEdit}
+                className="p-1.5 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {editFormError && (
+              <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-bold flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+                <span>{editFormError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleSaveEdit} className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider">Kaynak Kitap Adı *</label>
+                  <input
+                    type="text"
+                    required
+                    value={editBookName}
+                    onChange={(e) => setEditBookName(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider">Yayınevi</label>
+                  <input
+                    type="text"
+                    value={editPublisher}
+                    onChange={(e) => setEditPublisher(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider">İlişkili Ders</label>
+                  <select
+                    value={editSubject}
+                    onChange={(e) => setEditSubject(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  >
+                    {['Matematik', 'Geometri', 'Türkçe', 'Edebiyat', 'Fizik', 'Kimya', 'Biyoloji', 'Tarih', 'Coğrafya', 'Felsefe', 'Genel'].map((subj) => (
+                      <option key={subj} value={subj}>{subj}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider">Zorluk Seviyesi</label>
+                  <select
+                    value={editDifficulty}
+                    onChange={(e) => setEditDifficulty(e.target.value as BookDifficulty)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  >
+                    <option value="Kolay">Kolay</option>
+                    <option value="Orta">Orta</option>
+                    <option value="Zor">Zor</option>
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider">Hedef Süre (Gün)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={editTargetDurationDays || ''}
+                    onChange={(e) => setEditTargetDurationDays(e.target.value ? Number(e.target.value) : 0)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider">Son Tarih</label>
+                  <input
+                    type="date"
+                    value={editTargetDate}
+                    onChange={(e) => setEditTargetDate(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider">Hedef Soru</label>
+                  <input
+                    type="number"
+                    value={editHedefSoruSayisi || ''}
+                    onChange={(e) => setEditHedefSoruSayisi(e.target.value ? Number(e.target.value) : undefined)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider">Koç Notu & Talimatlar</label>
+                <input
+                  type="text"
+                  value={editNote}
+                  onChange={(e) => setEditNote(e.target.value)}
+                  placeholder="Örn: Bölüm sonu testleri çözülecek, yanlışlar soru bankasından işaretlenecek."
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              <div className="flex items-center gap-2 p-3 rounded-xl bg-slate-50 border border-slate-200">
+                <input
+                  type="checkbox"
+                  id="editCompletedCheck"
+                  checked={editCompleted}
+                  onChange={(e) => setEditCompleted(e.target.checked)}
+                  className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                />
+                <label htmlFor="editCompletedCheck" className="text-xs font-bold text-slate-700 cursor-pointer select-none">
+                  Bu kaynak tamamlandı olarak işaretlensin
+                </label>
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={handleCloseEdit}
+                  className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs font-bold transition-all cursor-pointer"
+                >
+                  İptal
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black transition-all flex items-center gap-2 shadow-xs cursor-pointer active:scale-95"
+                >
+                  <Save className="w-4 h-4" />
+                  <span>Değişiklikleri Kaydet</span>
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 
